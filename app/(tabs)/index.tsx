@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
+import DeleteConfirm from '../../components/DeleteConfirm';
 import FolderMenu from '../../components/FolderMenu';
 import NoteCard from '../../components/NoteCard';
 import { BorderRadius, Colors, Spacing, Typography } from '../../constants/theme';
@@ -37,6 +38,7 @@ export default function HomeScreen() {
   const [sortMode, setSortMode] = useState<SortMode>('modified');
   const [folderMenuVisible, setFolderMenuVisible] = useState(false);
   const [isPullSyncing, setIsPullSyncing] = useState(false);
+  const [pendingDeleteNote, setPendingDeleteNote] = useState<Note | null>(null);
 
   const folderCounts = useMemo(() => {
     const counts: Record<string, number> = {
@@ -157,23 +159,7 @@ export default function HomeScreen() {
   }
 
   function confirmDeleteNote(note: Note) {
-    const inTrash = currentFolder === 'trash';
-    Alert.alert(
-      inTrash ? 'Delete Note Permanently' : 'Move Note to Recycle Bin',
-      inTrash
-        ? 'This note will be removed permanently.'
-        : 'This note will be moved to Recycle Bin.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: inTrash ? 'Delete' : 'Move',
-          style: 'destructive',
-          onPress: () => {
-            handleDeleteNote(note.id);
-          },
-        },
-      ]
-    );
+    setPendingDeleteNote(note);
   }
 
   function renderNoteDeleteAction(
@@ -300,6 +286,24 @@ export default function HomeScreen() {
         onSelectFolder={setCurrentFolder}
         onCreateFolder={createFolder}
         onDeleteFolder={handleDeleteFolder}
+      />
+
+      <DeleteConfirm
+        visible={!!pendingDeleteNote}
+        title={currentFolder === 'trash' ? 'Delete Note Permanently' : 'Move Note to Recycle Bin'}
+        message={
+          currentFolder === 'trash'
+            ? 'This note will be removed permanently.'
+            : 'This note will be moved to Recycle Bin.'
+        }
+        confirmText={currentFolder === 'trash' ? 'Delete' : 'Move'}
+        onCancel={() => setPendingDeleteNote(null)}
+        onConfirm={async () => {
+          if (!pendingDeleteNote) return;
+          const noteId = pendingDeleteNote.id;
+          setPendingDeleteNote(null);
+          await handleDeleteNote(noteId);
+        }}
       />
     </View>
   );

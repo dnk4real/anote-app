@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Alert, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import DeleteConfirm from './DeleteConfirm';
 import { BorderRadius, Colors, Spacing, Typography } from '../constants/theme';
 import { useColorScheme } from '../hooks/use-color-scheme';
 import { Folder } from '../types/note';
@@ -37,6 +38,7 @@ export default function FolderMenu({
   const colors = Colors[colorScheme];
   const [folderName, setFolderName] = useState('');
   const [activeSwipeFolderId, setActiveSwipeFolderId] = useState<string | null>(null);
+  const [pendingDeleteFolder, setPendingDeleteFolder] = useState<Folder | null>(null);
 
   function submitFolder() {
     const name = folderName.trim();
@@ -46,20 +48,7 @@ export default function FolderMenu({
   }
 
   function confirmDeleteFolder(folder: Folder) {
-    Alert.alert(
-      'Delete Folder',
-      `Delete "${folder.name}"? Notes inside will be kept.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            onDeleteFolder(folder.id);
-          },
-        },
-      ]
-    );
+    setPendingDeleteFolder(folder);
   }
 
   function renderDeleteAction(folder: Folder, progress: Animated.AnimatedInterpolation<number>) {
@@ -169,6 +158,19 @@ export default function FolderMenu({
           </Pressable>
         </Pressable>
       </GestureHandlerRootView>
+
+      <DeleteConfirm
+        visible={!!pendingDeleteFolder}
+        title="Delete Folder"
+        message={pendingDeleteFolder ? `Delete "${pendingDeleteFolder.name}"? Notes inside will be kept.` : ''}
+        onCancel={() => setPendingDeleteFolder(null)}
+        onConfirm={async () => {
+          if (!pendingDeleteFolder) return;
+          const folderId = pendingDeleteFolder.id;
+          setPendingDeleteFolder(null);
+          await onDeleteFolder(folderId);
+        }}
+      />
     </Modal>
   );
 }
