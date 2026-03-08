@@ -1,14 +1,40 @@
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '../constants/theme';
 import { FontProvider } from '../contexts/FontContext';
 import { NotesProvider } from '../contexts/NotesContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // ignore duplicate calls during fast refresh
+});
+
 export default function RootLayout() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const [fontsLoaded] = useFonts({
+    'SourceHanSansCN-Regular': require('../assets/fonts/SourceHanSansCN-Regular.otf'),
+    'SourceHanSansCN-Bold': require('../assets/fonts/SourceHanSansCN-Bold.otf'),
+    'SourceHanSerifCN-Regular': require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
+    'SourceHanSerifCN-Bold': require('../assets/fonts/SourceHanSerifCN-Bold.otf'),
+    'GlowSansSC-Regular': require('../assets/fonts/GlowSansSC-Regular.otf'),
+    'GlowSansSC-Bold': require('../assets/fonts/GlowSansSC-Bold.otf'),
+  });
+
+  useEffect(() => {
+    if (!fontsLoaded) return;
+    SplashScreen.hideAsync().catch(() => {
+      // ignore hide errors during refresh
+    });
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

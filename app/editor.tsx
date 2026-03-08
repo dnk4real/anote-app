@@ -69,14 +69,16 @@ function makeEditorDocument(
   background: string,
   textColor: string,
   hintColor: string,
-  fontStack: string
+  fontFaceCss: string,
+  fontFamily: string
 ): string {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
+  ${fontFaceCss}
   body {
     margin: 0;
     background: ${background};
-    font-family: ${fontStack};
+    font-family: ${fontFamily};
     color: ${textColor};
   }
   #editor {
@@ -111,6 +113,9 @@ function makeEditorDocument(
   ul, ol { padding-left: 24px; }
   li { margin: 0 0 0.24em; }
   li:last-child { margin-bottom: 0; }
+  #editor b, #editor strong {
+    font-weight: 700;
+  }
 </style></head>
 <body>
 <div id="editor" contenteditable="true">${initialHtml}</div>
@@ -222,7 +227,7 @@ function makeEditorDocument(
 export default function EditorScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { editorFontStack } = useFontSettings();
+  const { editorFontFaceCss, editorFontFamily, fontPreset } = useFontSettings();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
@@ -268,10 +273,11 @@ export default function EditorScreen() {
         colors.background,
         colors.textPrimary,
         colors.textTertiary,
-        editorFontStack
+        editorFontFaceCss,
+        editorFontFamily
       ),
     }),
-    [editorInitialHtml, colors.background, colors.textPrimary, colors.textTertiary, editorFontStack]
+    [editorInitialHtml, colors.background, colors.textPrimary, colors.textTertiary, editorFontFaceCss, editorFontFamily]
   );
 
   useEffect(() => {
@@ -556,11 +562,15 @@ export default function EditorScreen() {
       </View>
 
       <WebView
+        key={`editor-${fontPreset}`}
         ref={webviewRef}
         source={editorSource}
         onMessage={(event) => onWebMessage(event.nativeEvent.data)}
         style={[styles.webview, { backgroundColor: colors.background }]}
         originWhitelist={['*']}
+        allowFileAccess
+        allowFileAccessFromFileURLs
+        allowUniversalAccessFromFileURLs
       />
 
       <View style={[styles.toolbarWrap, { bottom: toolbarBottom }]}> 

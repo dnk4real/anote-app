@@ -18,7 +18,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const router = useRouter();
-  const { appFontStyle } = useFontSettings();
+  const { appHeadingFontStyle } = useFontSettings();
 
   const {
     notes,
@@ -223,7 +223,7 @@ export default function HomeScreen() {
         </Pressable>
 
         <Pressable style={styles.titleBtn} onPress={() => setFolderMenuVisible(true)}>
-          <Text style={[Typography.heading, appFontStyle, { color: colors.textPrimary }]} numberOfLines={1}>
+          <Text style={[Typography.heading, appHeadingFontStyle, { color: colors.textPrimary }]} numberOfLines={1}>
             {getFolderLabel()}
           </Text>
           <Ionicons name="chevron-down" size={16} color={colors.textTertiary} />

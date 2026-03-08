@@ -1,53 +1,123 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+﻿import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Platform, TextStyle } from 'react-native';
+import { TextStyle } from 'react-native';
 
 const FONT_PRESET_KEY = '@a_note_font_preset';
 
-export type FontPreset = 'system' | 'sans' | 'serif';
+export type FontPreset = 'system' | 'source_han_sans' | 'source_han_serif' | 'glow_sans';
 
 interface FontOption {
   id: FontPreset;
   label: string;
-  description: string;
 }
 
 interface FontContextValue {
   fontPreset: FontPreset;
   fontOptions: FontOption[];
   appFontStyle: TextStyle;
-  editorFontStack: string;
+  appHeadingFontStyle: TextStyle;
+  editorFontFaceCss: string;
+  editorFontFamily: string;
   setFontPreset: (preset: FontPreset) => Promise<void>;
 }
 
+type FontAssetGroup = {
+  regular: number;
+  bold: number;
+};
+
 const FONT_OPTIONS: FontOption[] = [
-  { id: 'system', label: 'System', description: 'Default system font' },
-  { id: 'sans', label: 'Sans', description: 'Clean sans-serif look' },
-  { id: 'serif', label: 'Serif', description: 'Book-like serif look' },
+  { id: 'system', label: '系统' },
+  { id: 'source_han_sans', label: '更纱黑体' },
+  { id: 'source_han_serif', label: '思源宋体' },
+  { id: 'glow_sans', label: '未来荧黑' },
 ];
 
-const EDITOR_FONT_STACK: Record<FontPreset, string> = {
-  system: `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
-  sans: `"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`,
-  serif: `"Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", serif`,
+const FONT_ASSETS: Record<Exclude<FontPreset, 'system'>, FontAssetGroup> = {
+  source_han_sans: {
+    regular: require('../assets/fonts/SourceHanSansCN-Regular.otf'),
+    bold: require('../assets/fonts/SourceHanSansCN-Bold.otf'),
+  },
+  source_han_serif: {
+    regular: require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
+    bold: require('../assets/fonts/SourceHanSerifCN-Bold.otf'),
+  },
+  glow_sans: {
+    regular: require('../assets/fonts/GlowSansSC-Regular.otf'),
+    bold: require('../assets/fonts/GlowSansSC-Bold.otf'),
+  },
+};
+
+const RN_FONT_FAMILY: Record<Exclude<FontPreset, 'system'>, { regular: string; bold: string }> = {
+  source_han_sans: { regular: 'SourceHanSansCN-Regular', bold: 'SourceHanSansCN-Bold' },
+  source_han_serif: { regular: 'SourceHanSerifCN-Regular', bold: 'SourceHanSerifCN-Bold' },
+  glow_sans: { regular: 'GlowSansSC-Regular', bold: 'GlowSansSC-Bold' },
 };
 
 const FontContext = createContext<FontContextValue | undefined>(undefined);
 
-function getReactNativeFontFamily(preset: FontPreset): string | undefined {
-  if (preset === 'system') return undefined;
-  if (preset === 'sans') {
-    return Platform.select({
-      ios: 'PingFang SC',
-      android: 'sans-serif',
-      default: undefined,
-    });
+function toFontPreset(raw: string | null): FontPreset | null {
+  if (!raw) return null;
+
+  // Backward compatibility for old keys.
+  if (raw === 'sans') return 'source_han_sans';
+  if (raw === 'serif') return 'source_han_serif';
+
+  if (
+    raw === 'system' ||
+    raw === 'source_han_sans' ||
+    raw === 'source_han_serif' ||
+    raw === 'glow_sans'
+  ) {
+    return raw;
   }
-  return Platform.select({
-    ios: 'Songti SC',
-    android: 'serif',
-    default: 'serif',
-  });
+
+  return null;
+}
+
+function escapeCssUrl(value: string): string {
+  return value.replace(/'/g, '%27');
+}
+
+function buildEditorFontConfig(preset: FontPreset): {
+  faceCss: string;
+  family: string;
+} {
+  if (preset === 'system') {
+    return {
+      faceCss: '',
+      family: `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
+    };
+  }
+
+  const assets = FONT_ASSETS[preset];
+  const regularAsset = Asset.fromModule(assets.regular);
+  const boldAsset = Asset.fromModule(assets.bold);
+  const regularUri = escapeCssUrl(regularAsset.localUri || regularAsset.uri);
+  const boldUri = escapeCssUrl(boldAsset.localUri || boldAsset.uri);
+
+  const family = `ANoteEditor_${preset}`;
+
+  const faceCss = `
+    @font-face {
+      font-family: '${family}';
+      src: url('${regularUri}') format('opentype');
+      font-style: normal;
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: '${family}';
+      src: url('${boldUri}') format('opentype');
+      font-style: normal;
+      font-weight: 700;
+    }
+  `;
+
+  return {
+    faceCss,
+    family: `'${family}', "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`,
+  };
 }
 
 export function FontProvider({ children }: { children: React.ReactNode }) {
@@ -57,9 +127,8 @@ export function FontProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const saved = await AsyncStorage.getItem(FONT_PRESET_KEY);
-        if (saved === 'system' || saved === 'sans' || saved === 'serif') {
-          setFontPresetState(saved);
-        }
+        const parsed = toFontPreset(saved);
+        if (parsed) setFontPresetState(parsed);
       } catch {
         // ignore load failures and keep default preset
       }
@@ -76,19 +145,30 @@ export function FontProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const appFontStyle = useMemo<TextStyle>(() => {
-    const fontFamily = getReactNativeFontFamily(fontPreset);
-    return fontFamily ? { fontFamily } : {};
+    if (fontPreset === 'system') return {};
+    const family = RN_FONT_FAMILY[fontPreset].regular;
+    return { fontFamily: family, fontWeight: '400' };
   }, [fontPreset]);
+
+  const appHeadingFontStyle = useMemo<TextStyle>(() => {
+    if (fontPreset === 'system') return {};
+    const family = RN_FONT_FAMILY[fontPreset].bold;
+    return { fontFamily: family, fontWeight: '400' };
+  }, [fontPreset]);
+
+  const editorConfig = useMemo(() => buildEditorFontConfig(fontPreset), [fontPreset]);
 
   const value = useMemo<FontContextValue>(
     () => ({
       fontPreset,
       fontOptions: FONT_OPTIONS,
       appFontStyle,
-      editorFontStack: EDITOR_FONT_STACK[fontPreset],
+      appHeadingFontStyle,
+      editorFontFaceCss: editorConfig.faceCss,
+      editorFontFamily: editorConfig.family,
       setFontPreset,
     }),
-    [appFontStyle, fontPreset, setFontPreset]
+    [appFontStyle, appHeadingFontStyle, editorConfig.faceCss, editorConfig.family, fontPreset, setFontPreset]
   );
 
   return <FontContext.Provider value={value}>{children}</FontContext.Provider>;

@@ -261,15 +261,17 @@ const styles = StyleSheet.create({
   },
   fontRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.sm,
   },
   fontBtn: {
-    flex: 1,
-    minHeight: 36,
+    width: '48%',
+    minHeight: 38,
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
   },
   input: {
     borderWidth: 1,
