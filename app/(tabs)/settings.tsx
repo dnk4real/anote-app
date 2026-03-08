@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import SyncBadge from '../../components/SyncBadge';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '../../constants/theme';
+import { FontPreset, useFontSettings } from '../../contexts/FontContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useColorScheme } from '../../hooks/use-color-scheme';
 
@@ -27,6 +28,7 @@ export default function SettingsScreen() {
     saveGitHubConfig,
     clearGitHubConfig,
   } = useNotes();
+  const { fontPreset, fontOptions, setFontPreset } = useFontSettings();
 
   const [repo, setRepo] = useState('');
   const [token, setToken] = useState('');
@@ -69,9 +71,53 @@ export default function SettingsScreen() {
     setBranch('main');
   }
 
+  async function handleFontPresetChange(preset: FontPreset) {
+    await setFontPreset(preset);
+  }
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <Text style={[Typography.title, { color: colors.textPrimary }]}>Settings</Text>
+
+      <View
+        style={[
+          styles.section,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.borderLight,
+            ...Shadows.card,
+            shadowColor: colors.shadowColor,
+          },
+        ]}
+      >
+        <View style={styles.sectionHeader}>
+          <Ionicons name="text-outline" size={22} color={colors.textPrimary} />
+          <Text style={[Typography.heading, { color: colors.textPrimary }]}>App Font</Text>
+        </View>
+
+        <View style={styles.fontRow}>
+          {fontOptions.map((option) => {
+            const active = fontPreset === option.id;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                style={[
+                  styles.fontBtn,
+                  {
+                    borderColor: active ? colors.primary : colors.border,
+                    backgroundColor: active ? colors.primaryLight : 'transparent',
+                  },
+                ]}
+                onPress={() => handleFontPresetChange(option.id)}
+              >
+                <Text style={[Typography.bodySmall, { color: active ? colors.primary : colors.textSecondary }]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
 
       <TouchableOpacity
         style={[
@@ -212,6 +258,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  fontRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  fontBtn: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     borderWidth: 1,

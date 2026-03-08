@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '../constants/theme';
+import { useFontSettings } from '../contexts/FontContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 import { Note } from '../types/note';
 
@@ -36,6 +37,7 @@ function truncatePreview(text: string, maxChars: number): string {
 export default function NoteCard({ note, onPress, onTogglePin, onToggleStar }: NoteCardProps) {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { appFontStyle } = useFontSettings();
 
   const preview = stripHtml(note.content);
   const compactPreview = truncatePreview(preview, 36);
@@ -82,6 +84,7 @@ export default function NoteCard({ note, onPress, onTogglePin, onToggleStar }: N
         ellipsizeMode="tail"
         style={[
           Typography.body,
+          appFontStyle,
           compactPreview
             ? { color: colors.textPrimary }
             : { color: colors.textSecondary, fontStyle: 'italic' },

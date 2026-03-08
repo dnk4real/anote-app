@@ -1,12 +1,13 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import DeleteConfirm from '../../components/DeleteConfirm';
 import FolderMenu from '../../components/FolderMenu';
 import NoteCard from '../../components/NoteCard';
 import { BorderRadius, Colors, Spacing, Typography } from '../../constants/theme';
+import { useFontSettings } from '../../contexts/FontContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useColorScheme } from '../../hooks/use-color-scheme';
 import { Note } from '../../types/note';
@@ -17,6 +18,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const router = useRouter();
+  const { appFontStyle } = useFontSettings();
 
   const {
     notes,
@@ -39,6 +41,14 @@ export default function HomeScreen() {
   const [folderMenuVisible, setFolderMenuVisible] = useState(false);
   const [isPullSyncing, setIsPullSyncing] = useState(false);
   const [pendingDeleteNote, setPendingDeleteNote] = useState<Note | null>(null);
+  const [syncNotice, setSyncNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const syncNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (syncNoticeTimerRef.current) clearTimeout(syncNoticeTimerRef.current);
+    };
+  }, []);
 
   const folderCounts = useMemo(() => {
     const counts: Record<string, number> = {
@@ -142,12 +152,13 @@ export default function HomeScreen() {
     const result = await syncWithGitHub();
     setIsPullSyncing(false);
 
+    if (syncNoticeTimerRef.current) clearTimeout(syncNoticeTimerRef.current);
     if (result.ok) {
-      Alert.alert('Sync successful', 'GitHub sync completed.');
-      return;
+      setSyncNotice({ type: 'success', text: 'GitHub sync successful' });
+    } else {
+      setSyncNotice({ type: 'error', text: result.error || 'GitHub sync failed' });
     }
-
-    Alert.alert('Sync failed', result.error || 'Please check your GitHub settings.');
+    syncNoticeTimerRef.current = setTimeout(() => setSyncNotice(null), 1800);
   }
 
   async function handleDeleteNote(noteId: string) {
@@ -212,7 +223,7 @@ export default function HomeScreen() {
         </Pressable>
 
         <Pressable style={styles.titleBtn} onPress={() => setFolderMenuVisible(true)}>
-          <Text style={[Typography.heading, { color: colors.textPrimary }]} numberOfLines={1}>
+          <Text style={[Typography.heading, appFontStyle, { color: colors.textPrimary }]} numberOfLines={1}>
             {getFolderLabel()}
           </Text>
           <Ionicons name="chevron-down" size={16} color={colors.textTertiary} />
@@ -237,6 +248,32 @@ export default function HomeScreen() {
           <Ionicons name={sortIcon()} size={17} color={colors.textSecondary} />
         </Pressable>
       </View>
+
+      {syncNotice && (
+        <View
+          style={[
+            styles.syncNotice,
+            {
+              backgroundColor: syncNotice.type === 'success' ? colors.successLight : colors.dangerLight,
+              borderColor: syncNotice.type === 'success' ? colors.success : colors.danger,
+            },
+          ]}
+        >
+          <Ionicons
+            name={syncNotice.type === 'success' ? 'checkmark-circle' : 'close-circle'}
+            size={16}
+            color={syncNotice.type === 'success' ? colors.success : colors.danger}
+          />
+          <Text
+            style={[
+              Typography.caption,
+              { color: syncNotice.type === 'success' ? colors.success : colors.danger },
+            ]}
+          >
+            {syncNotice.text}
+          </Text>
+        </View>
+      )}
 
       <FlatList
         data={filteredNotes}
@@ -355,6 +392,18 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     marginTop: 80,
+  },
+  syncNotice: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    alignSelf: 'center',
   },
   noteRow: {
     marginBottom: Spacing.md,

@@ -41,7 +41,15 @@
                                                   }
                                      }
                                  ],
-                                 "expo-secure-store"
+                                 "expo-secure-store",
+                                 [
+                                     "expo-media-library",
+                                     {
+                                         "granularPermissions":  [
+                                                                     "photo"
+                                                                 ]
+                                     }
+                                 ]
                              ],
                  "experiments":  {
                                      "typedRoutes":  true,

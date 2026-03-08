@@ -4,6 +4,7 @@ import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, Vi
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import DeleteConfirm from './DeleteConfirm';
 import { BorderRadius, Colors, Spacing, Typography } from '../constants/theme';
+import { useFontSettings } from '../contexts/FontContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 import { Folder } from '../types/note';
 
@@ -36,6 +37,7 @@ export default function FolderMenu({
 }: FolderMenuProps) {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { appFontStyle } = useFontSettings();
   const [folderName, setFolderName] = useState('');
   const [activeSwipeFolderId, setActiveSwipeFolderId] = useState<string | null>(null);
   const [pendingDeleteFolder, setPendingDeleteFolder] = useState<Folder | null>(null);
@@ -99,7 +101,7 @@ export default function FolderMenu({
                 >
                   <View style={styles.itemLeft}>
                     <Ionicons name={folder.icon} size={18} color={colors.textSecondary} />
-                    <Text style={[Typography.bodySmall, { color: colors.textPrimary }]}>{folder.label}</Text>
+                    <Text style={[Typography.bodySmall, appFontStyle, { color: colors.textPrimary }]}>{folder.label}</Text>
                   </View>
                   <Text style={[Typography.caption, { color: colors.textTertiary }]}>{counts[folder.id] ?? 0}</Text>
                 </Pressable>
@@ -128,7 +130,7 @@ export default function FolderMenu({
                   >
                     <View style={styles.itemLeft}>
                       <Ionicons name="folder-outline" size={18} color={colors.textSecondary} />
-                      <Text style={[Typography.bodySmall, { color: colors.textPrimary }]} numberOfLines={1}>
+                      <Text style={[Typography.bodySmall, appFontStyle, { color: colors.textPrimary }]} numberOfLines={1}>
                         {folder.name}
                       </Text>
                     </View>

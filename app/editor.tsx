@@ -5,7 +5,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Image,
   Keyboard,
   Modal,
   Platform,
@@ -19,6 +18,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { BorderRadius, Colors, Spacing, Typography } from '../constants/theme';
+import { useFontSettings } from '../contexts/FontContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 
@@ -64,41 +64,53 @@ function getCharCount(html: string): number {
   return stripHtml(html).replace(/\s+/g, '').length;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function makeEditorDocument(initialHtml: string, background: string, textColor: string, hintColor: string): string {
+function makeEditorDocument(
+  initialHtml: string,
+  background: string,
+  textColor: string,
+  hintColor: string,
+  fontStack: string
+): string {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   body {
     margin: 0;
     background: ${background};
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: ${fontStack};
     color: ${textColor};
   }
   #editor {
     min-height: 100vh;
-    padding: 20px 20px 160px;
-    line-height: 1.8;
-    font-size: 20px;
+    padding: 30px 27px 168px 30px;
+    line-height: 1.68;
+    font-size: 16px;
     outline: none;
     word-wrap: break-word;
     overflow-wrap: break-word;
   }
+  #editor p,
+  #editor div,
+  #editor ul,
+  #editor ol,
+  #editor blockquote {
+    margin: 0 0 0.58em;
+  }
+  #editor p:last-child,
+  #editor div:last-child,
+  #editor ul:last-child,
+  #editor ol:last-child,
+  #editor blockquote:last-child {
+    margin-bottom: 0;
+  }
   #editor:empty:before { content: 'Start typing...'; color: ${hintColor}; }
   blockquote {
-    margin: 0;
     border-left: 3px solid #c5cad3;
     padding-left: 12px;
     color: #6b7280;
   }
-  ul { margin: 0; padding-left: 24px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 0 0 0.24em; }
+  li:last-child { margin-bottom: 0; }
 </style></head>
 <body>
 <div id="editor" contenteditable="true">${initialHtml}</div>
@@ -210,6 +222,7 @@ function makeEditorDocument(initialHtml: string, background: string, textColor: 
 export default function EditorScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { editorFontStack } = useFontSettings();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
@@ -236,8 +249,6 @@ export default function EditorScreen() {
   const [shareOpen, setShareOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [editorInitialHtml, setEditorInitialHtml] = useState(noteContent);
@@ -256,10 +267,11 @@ export default function EditorScreen() {
         editorInitialHtml,
         colors.background,
         colors.textPrimary,
-        colors.textTertiary
+        colors.textTertiary,
+        editorFontStack
       ),
     }),
-    [editorInitialHtml, colors.background, colors.textPrimary, colors.textTertiary]
+    [editorInitialHtml, colors.background, colors.textPrimary, colors.textTertiary, editorFontStack]
   );
 
   useEffect(() => {
@@ -442,45 +454,12 @@ export default function EditorScreen() {
     webviewRef.current?.injectJavaScript('window.__readText(); true;');
   }
 
-  function buildLongImage() {
-    const text = stripHtml(contentRef.current) || ' ';
-    const lines = text.match(/.{1,28}/g) || [' '];
-    const lineHeight = 44;
-    const width = 1080;
-    const height = Math.max(800, lines.length * lineHeight + 220);
-
-    const textSvg = lines
-      .map((line, index) => `<text x="90" y="${180 + index * lineHeight}" font-size="34" fill="#1f2937">${escapeHtml(line)}</text>`)
-      .join('');
-
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-      <rect width="100%" height="100%" fill="#ffffff" />
-      ${textSvg}
-    </svg>`;
-
-    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-  }
-
   async function handleGenerateLongImage() {
-    const latestHtml = await captureContent();
-    contentRef.current = latestHtml;
+    if (!note) return;
+    await captureContent();
+    await saveNow();
     setShareOpen(false);
-    setPreviewImageUri(buildLongImage());
-    setPreviewOpen(true);
-  }
-
-  function handleDownloadLongImage() {
-    if (!previewImageUri) return;
-
-    if (Platform.OS === 'web') {
-      const link = document.createElement('a');
-      link.href = previewImageUri;
-      link.download = `note-${Date.now()}.svg`;
-      link.click();
-      return;
-    }
-
-    Share.share({ message: 'Long image preview', url: previewImageUri });
+    router.push({ pathname: '/long-image-preview', params: { id: note.id } });
   }
 
   if (!note) {
@@ -636,20 +615,6 @@ export default function EditorScreen() {
             </View>
           </Pressable>
         </Pressable>
-      </Modal>
-
-      <Modal visible={previewOpen} animationType="slide" onRequestClose={() => setPreviewOpen(false)}>
-        <View style={[styles.previewWrap, { backgroundColor: colors.background }]}> 
-          <View style={styles.previewTop}>
-            <Pressable onPress={() => setPreviewOpen(false)}>
-              <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Close</Text>
-            </Pressable>
-            <Pressable onPress={handleDownloadLongImage}>
-              <Text style={[Typography.bodySmall, { color: colors.primary }]}>Download</Text>
-            </Pressable>
-          </View>
-          {previewImageUri && <Image source={{ uri: previewImageUri }} style={styles.previewImage} resizeMode="contain" />}
-        </View>
       </Modal>
     </View>
   );
@@ -813,20 +778,5 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-  },
-  previewWrap: {
-    flex: 1,
-  },
-  previewTop: {
-    paddingTop: Spacing.xxxxl,
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  previewImage: {
-    flex: 1,
-    width: '100%',
   },
 });

@@ -14,11 +14,11 @@ export const Colors = {
     secondary: '#8B6914',         // Warm gold
 
     // Text
-    text: '#2C1810',
+    text: '#63635A',
     icon: '#8C7B6B',
-    textPrimary: '#2C1810',       // Deep brown
-    textSecondary: '#8C7B6B',     // Muted brown
-    textTertiary: '#B5A89A',      // Light brown
+    textPrimary: '#63635A',       // Warm gray-brown
+    textSecondary: '#63635A',     // Warm gray-brown
+    textTertiary: '#7D7C73',      // Muted warm gray
     textInverse: '#FFFFFF',
 
     // Functional
