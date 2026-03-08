@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Folder, Note } from '../types/note';
+import { Folder, Note, NoteTombstone } from '../types/note';
 
 const NOTES_KEY = '@a_note_notes';
 const FOLDERS_KEY = '@a_note_folders';
+const TOMBSTONES_KEY = '@a_note_tombstones';
 
 function sortNotes(notes: Note[]): Note[] {
   return [...notes].sort((a, b) => {
@@ -95,4 +96,39 @@ export async function getFolders(): Promise<Folder[]> {
 
 export async function saveFolders(folders: Folder[]): Promise<void> {
   await AsyncStorage.setItem(FOLDERS_KEY, JSON.stringify(folders));
+}
+
+export async function getTombstones(): Promise<NoteTombstone[]> {
+  try {
+    const raw = await AsyncStorage.getItem(TOMBSTONES_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as NoteTombstone[];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveTombstones(tombstones: NoteTombstone[]): Promise<void> {
+  await AsyncStorage.setItem(TOMBSTONES_KEY, JSON.stringify(tombstones));
+}
+
+export async function upsertTombstone(tombstone: NoteTombstone): Promise<void> {
+  const tombstones = await getTombstones();
+  const index = tombstones.findIndex((item) => item.id === tombstone.id);
+
+  if (index >= 0) {
+    const current = tombstones[index];
+    const currentTs = new Date(current.deletedAt).getTime();
+    const nextTs = new Date(tombstone.deletedAt).getTime();
+    tombstones[index] = nextTs >= currentTs ? tombstone : current;
+  } else {
+    tombstones.push(tombstone);
+  }
+
+  await saveTombstones(tombstones);
+}
+
+export async function removeTombstone(id: string): Promise<void> {
+  const tombstones = await getTombstones();
+  await saveTombstones(tombstones.filter((item) => item.id !== id));
 }

@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   Keyboard,
   Modal,
   Platform,
@@ -22,9 +23,10 @@ import { useFontSettings } from '../contexts/FontContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 
-type FormatKind = 'bold' | 'italic' | 'center' | 'list' | 'quote';
+type FormatKind = 'heading' | 'bold' | 'italic' | 'center' | 'list' | 'quote';
 
 interface FormatState {
+  heading: boolean;
   bold: boolean;
   italic: boolean;
   center: boolean;
@@ -42,6 +44,7 @@ function isFormatState(value: unknown): value is FormatState {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
   return (
+    typeof candidate.heading === 'boolean' &&
     typeof candidate.bold === 'boolean' &&
     typeof candidate.italic === 'boolean' &&
     typeof candidate.center === 'boolean' &&
@@ -64,6 +67,24 @@ function stripHtml(html: string): string {
 
 function getCharCount(html: string): number {
   return stripHtml(html).replace(/\s+/g, '').length;
+}
+
+function buildShellText(html: string): string {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/(p|div|li|blockquote|h[1-6]|ul|ol)>/gi, '\n')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#8203;|&#8204;|&#8205;|&#65279;/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function hasMeaningfulNoteContent(content: string): boolean {
@@ -103,6 +124,7 @@ function makeEditorDocument(
   }
   #editor p,
   #editor div,
+  #editor h2,
   #editor ul,
   #editor ol,
   #editor blockquote {
@@ -110,12 +132,18 @@ function makeEditorDocument(
   }
   #editor p:last-child,
   #editor div:last-child,
+  #editor h2:last-child,
   #editor ul:last-child,
   #editor ol:last-child,
   #editor blockquote:last-child {
     margin-bottom: 0;
   }
   #editor:empty:before { content: 'Start typing...'; color: ${hintColor}; }
+  #editor h2 {
+    font-size: 19px;
+    line-height: 1.5;
+    font-weight: 700;
+  }
   blockquote {
     border-left: 3px solid #c5cad3;
     padding-left: 12px;
@@ -245,8 +273,10 @@ function makeEditorDocument(
 
   const readState = () => {
     const formatBlock = (document.queryCommandValue('formatBlock') || '').toString().toLowerCase();
+    const heading = formatBlock === 'h2';
     emit('formatState', {
-      bold: document.queryCommandState('bold'),
+      heading,
+      bold: heading || document.queryCommandState('bold'),
       italic: document.queryCommandState('italic'),
       center: document.queryCommandState('justifyCenter'),
       list: document.queryCommandState('insertUnorderedList'),
@@ -255,6 +285,15 @@ function makeEditorDocument(
   };
 
   window.__editorApply = (kind) => {
+    if (kind === 'heading') {
+      const block = (document.queryCommandValue('formatBlock') || '').toString().toLowerCase();
+      if (block === 'h2') {
+        document.execCommand('formatBlock', false, 'div');
+      } else {
+        document.execCommand('formatBlock', false, 'h2');
+        document.execCommand('bold', false);
+      }
+    }
     if (kind === 'bold') document.execCommand('bold', false);
     if (kind === 'italic') document.execCommand('italic', false);
 
@@ -399,7 +438,10 @@ function makeEditorDocument(
     readState();
   };
 
-  setTimeout(readState, 0);
+  setTimeout(() => {
+    readState();
+    emit('contentSnapshot', snapshotHtml());
+  }, 0);
   if (${autoFocusOnLoad ? 'true' : 'false'}) {
     let bootTries = 0;
     const bootFocus = () => {
@@ -421,7 +463,7 @@ function makeEditorDocument(
 export default function EditorScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { editorFontFaceCss, editorFontFamily, fontPreset } = useFontSettings();
+  const { editorFontFaceCss, editorFontFamily, fontPreset, appFontStyle } = useFontSettings();
   const router = useRouter();
   const navigation = useNavigation();
   const { id, autoFocus } = useLocalSearchParams<{ id: string; autoFocus?: string }>();
@@ -448,6 +490,9 @@ export default function EditorScreen() {
   const keyboardBridgeInputRef = useRef<TextInput>(null);
   const webviewLoadedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shellHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shellOpacityRef = useRef(new Animated.Value(1));
+  const shellHiddenRef = useRef(false);
   const snapshotResolverRef = useRef<((html: string) => void) | null>(null);
   const isLeavingRef = useRef(false);
   const contentRef = useRef(noteContent);
@@ -461,9 +506,12 @@ export default function EditorScreen() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [editorInitialHtml, setEditorInitialHtml] = useState(noteContent);
+  const [editorShellText, setEditorShellText] = useState(buildShellText(noteContent));
+  const [showEditorShell, setShowEditorShell] = useState(!shouldAutoFocusParam);
   const [charCount, setCharCount] = useState(getCharCount(noteContent));
   const [bridgeValue, setBridgeValue] = useState('');
   const [formats, setFormats] = useState<FormatState>({
+    heading: false,
     bold: false,
     italic: false,
     center: false,
@@ -506,9 +554,13 @@ export default function EditorScreen() {
     loadedNoteIdRef.current = noteId;
     contentRef.current = noteContent;
     setEditorInitialHtml(noteContent);
+    setEditorShellText(buildShellText(noteContent));
+    setShowEditorShell(!shouldAutoFocusParam);
+    shellOpacityRef.current.setValue(1);
+    shellHiddenRef.current = false;
     setCharCount(getCharCount(noteContent));
     setBridgeValue('');
-  }, [noteId, noteContent]);
+  }, [noteId, noteContent, shouldAutoFocusParam]);
 
   const deleteNoteIfEmpty = useCallback(async (): Promise<boolean> => {
     const targetNoteId = noteIdRef.current;
@@ -540,6 +592,16 @@ export default function EditorScreen() {
     return () => {
       onShow.remove();
       onHide.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (shellHideTimerRef.current) {
+        clearTimeout(shellHideTimerRef.current);
+        shellHideTimerRef.current = null;
+      }
+      shellOpacityRef.current.stopAnimation();
     };
   }, []);
 
@@ -576,6 +638,38 @@ export default function EditorScreen() {
       saveNow();
     }, 900);
   }, [note, saveNow]);
+
+  const hideEditorShell = useCallback((delayMs = 0) => {
+    if (!showEditorShell) return;
+    if (shellHiddenRef.current) return;
+
+    if (shellHideTimerRef.current) {
+      clearTimeout(shellHideTimerRef.current);
+      shellHideTimerRef.current = null;
+    }
+
+    const runHide = () => {
+      if (shellHiddenRef.current) return;
+      shellHiddenRef.current = true;
+      Animated.timing(shellOpacityRef.current, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowEditorShell(false);
+      });
+    };
+
+    if (delayMs <= 0) {
+      runHide();
+      return;
+    }
+
+    shellHideTimerRef.current = setTimeout(() => {
+      shellHideTimerRef.current = null;
+      runHide();
+    }, delayMs);
+  }, [showEditorShell]);
 
   const goBackToMain = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -679,7 +773,8 @@ export default function EditorScreen() {
   const handleEditorLoadEnd = useCallback(() => {
     webviewLoadedRef.current = true;
     triggerAutoFocus();
-  }, [triggerAutoFocus]);
+    hideEditorShell(780);
+  }, [hideEditorShell, triggerAutoFocus]);
 
   async function handleInsertImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -747,6 +842,7 @@ export default function EditorScreen() {
         setFormats((prev) => {
           if (
             prev.bold === nextFormats.bold &&
+            prev.heading === nextFormats.heading &&
             prev.italic === nextFormats.italic &&
             prev.center === nextFormats.center &&
             prev.list === nextFormats.list &&
@@ -759,10 +855,17 @@ export default function EditorScreen() {
       }
 
       if (data.type === 'contentSnapshot' && typeof data.payload === 'string') {
-        contentRef.current = data.payload || '';
+        const nextContent = data.payload || '';
+        const hasChanged = nextContent !== contentRef.current;
+        contentRef.current = nextContent;
         if (!isLeavingRef.current) {
           setCharCount(getCharCount(contentRef.current));
-          scheduleSave();
+          if (hasChanged) {
+            scheduleSave();
+          }
+          if (showEditorShell && webviewLoadedRef.current) {
+            hideEditorShell(90);
+          }
         }
         if (snapshotResolverRef.current) {
           snapshotResolverRef.current(contentRef.current);
@@ -897,20 +1000,44 @@ export default function EditorScreen() {
         </View>
       </View>
 
-      <WebView
-        key={`editor-${fontPreset}`}
-        ref={webviewRef}
-        source={editorSource}
-        onMessage={(event) => onWebMessage(event.nativeEvent.data)}
-        onLoadEnd={handleEditorLoadEnd}
-        style={[styles.webview, { backgroundColor: colors.background }]}
-        originWhitelist={['*']}
-        keyboardDisplayRequiresUserAction={false}
-        allowFileAccess
-        allowFileAccessFromFileURLs
-        allowUniversalAccessFromFileURLs
-        androidLayerType="software"
-      />
+      <View style={styles.editorSurface}>
+        <WebView
+          key={`editor-${fontPreset}`}
+          ref={webviewRef}
+          source={editorSource}
+          onMessage={(event) => onWebMessage(event.nativeEvent.data)}
+          onLoadEnd={handleEditorLoadEnd}
+          style={[styles.webview, { backgroundColor: colors.background }]}
+          originWhitelist={['*']}
+          keyboardDisplayRequiresUserAction={false}
+          allowFileAccess
+          allowFileAccessFromFileURLs
+          allowUniversalAccessFromFileURLs
+          androidLayerType="hardware"
+        />
+
+        {showEditorShell && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.editorShell,
+              { backgroundColor: colors.background, opacity: shellOpacityRef.current },
+            ]}
+          >
+            <Text
+              style={[
+                styles.editorShellText,
+                appFontStyle,
+                editorShellText
+                  ? { color: colors.textPrimary }
+                  : { color: colors.textTertiary },
+              ]}
+            >
+              {editorShellText || 'Start typing...'}
+            </Text>
+          </Animated.View>
+        )}
+      </View>
       <TextInput
         ref={keyboardBridgeInputRef}
         style={styles.keyboardBridgeInput}
@@ -923,6 +1050,7 @@ export default function EditorScreen() {
 
       <View style={[styles.toolbarWrap, { bottom: toolbarBottom }]}> 
         <View style={[styles.toolbar, { borderTopColor: colors.borderLight, backgroundColor: colors.surface }]}> 
+          <ToolbarBtn onPress={() => applyFormat('heading')} label="H" active={formats.heading} color={colors.textSecondary} activeColor={colors.primary} />
           <ToolbarBtn onPress={() => applyFormat('bold')} icon="format-bold" active={formats.bold} color={colors.textSecondary} activeColor={colors.primary} />
           <ToolbarBtn onPress={() => applyFormat('italic')} icon="format-italic" active={formats.italic} color={colors.textSecondary} activeColor={colors.primary} />
           <ToolbarBtn onPress={() => applyFormat('center')} icon="format-align-center" active={formats.center} color={colors.textSecondary} activeColor={colors.primary} />
@@ -981,19 +1109,25 @@ export default function EditorScreen() {
 function ToolbarBtn({
   onPress,
   icon,
+  label,
   active,
   color,
   activeColor,
 }: {
   onPress: () => void;
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  icon?: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  label?: string;
   active: boolean;
   color: string;
   activeColor: string;
 }) {
   return (
     <Pressable style={styles.toolbarBtn} onPress={onPress}>
-      <MaterialCommunityIcons name={icon} size={22} color={active ? activeColor : color} />
+      {label ? (
+        <Text style={[styles.toolbarLabel, { color: active ? activeColor : color }]}>{label}</Text>
+      ) : (
+        <MaterialCommunityIcons name={icon} size={22} color={active ? activeColor : color} />
+      )}
     </Pressable>
   );
 }
@@ -1078,6 +1212,21 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
   },
+  editorSurface: {
+    flex: 1,
+    position: 'relative',
+  },
+  editorShell: {
+    ...StyleSheet.absoluteFillObject,
+    paddingTop: 30,
+    paddingRight: 27,
+    paddingBottom: 168,
+    paddingLeft: 30,
+  },
+  editorShellText: {
+    fontSize: 16,
+    lineHeight: 27,
+  },
   keyboardBridgeInput: {
     position: 'absolute',
     width: 1,
@@ -1106,6 +1255,11 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  toolbarLabel: {
+    fontSize: 21,
+    fontWeight: '700',
+    lineHeight: 24,
   },
   shareMenu: {
     position: 'absolute',

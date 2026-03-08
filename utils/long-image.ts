@@ -154,6 +154,12 @@ export function buildLongImage(options: LongImageOptions): LongImageBuildResult 
     #content strong {
       font-weight: 700 !important;
     }
+    #content h2 {
+      font-size: 15px !important;
+      font-weight: 700 !important;
+      line-height: 1.72 !important;
+      margin: 0 0 13px !important;
+    }
     #content i,
     #content em {
       font-style: italic !important;

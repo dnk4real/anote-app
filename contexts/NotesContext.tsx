@@ -1,7 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as GitHub from '../services/github';
 import * as Storage from '../services/storage';
-import { Folder, GitHubConfig, Note, SyncState } from '../types/note';
+import * as WebDAV from '../services/webdav';
+import {
+  Folder,
+  GitHubConfig,
+  Note,
+  NoteTombstone,
+  SyncProvider,
+  SyncState,
+  WebDAVConfig,
+} from '../types/note';
+
+const SYNC_PROVIDER_KEY = '@a_note_sync_provider';
 
 interface NotesContextType {
   notes: Note[];
@@ -9,9 +21,12 @@ interface NotesContextType {
   loading: boolean;
   searchQuery: string;
   syncState: SyncState;
+  syncProvider: SyncProvider;
   githubConfig: GitHubConfig | null;
+  webdavConfig: WebDAVConfig | null;
 
   setSearchQuery: (query: string) => void;
+  setSyncProvider: (provider: SyncProvider) => Promise<void>;
   loadNotes: () => Promise<void>;
   createNote: (content: string, folderId?: string) => Promise<Note>;
   updateNote: (id: string, content: string) => Promise<void>;
@@ -27,6 +42,8 @@ interface NotesContextType {
   syncWithGitHub: () => Promise<{ ok: boolean; error?: string }>;
   saveGitHubConfig: (config: GitHubConfig) => Promise<void>;
   clearGitHubConfig: () => Promise<void>;
+  saveWebDAVConfig: (config: WebDAVConfig) => Promise<void>;
+  clearWebDAVConfig: () => Promise<void>;
 }
 
 const NotesContext = createContext<NotesContextType | undefined>(undefined);
@@ -53,18 +70,34 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [syncState, setSyncState] = useState<SyncState>({ status: 'idle' });
+  const [syncProvider, setSyncProviderState] = useState<SyncProvider>('github');
   const [githubConfig, setGithubConfig] = useState<GitHubConfig | null>(null);
+  const [webdavConfig, setWebDAVConfig] = useState<WebDAVConfig | null>(null);
+  const [tombstones, setTombstones] = useState<NoteTombstone[]>([]);
 
   const reloadAll = useCallback(async () => {
-    const [storedNotes, storedFolders, config] = await Promise.all([
+    const [
+      storedNotes,
+      storedFolders,
+      storedTombstones,
+      github,
+      webdav,
+      persistedProvider,
+    ] = await Promise.all([
       Storage.getAllNotes(),
       Storage.getFolders(),
+      Storage.getTombstones(),
       GitHub.getGitHubConfig(),
+      WebDAV.getWebDAVConfig(),
+      AsyncStorage.getItem(SYNC_PROVIDER_KEY),
     ]);
 
     setNotes(storedNotes);
     setFolders(storedFolders);
-    setGithubConfig(config);
+    setTombstones(storedTombstones);
+    setGithubConfig(github);
+    setWebDAVConfig(webdav);
+    setSyncProviderState(persistedProvider === 'webdav' ? 'webdav' : 'github');
   }, []);
 
   useEffect(() => {
@@ -90,142 +123,186 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
     loadNotes();
   }, [loadNotes]);
 
-  const createNote = useCallback(async (content: string, folderId?: string) => {
-    const now = new Date().toISOString();
-    const note: Note = {
-      id: generateId(),
-      content,
-      createdAt: now,
-      updatedAt: now,
-      isPinned: false,
-      isStarred: false,
-      isDeleted: false,
-      folderIds: folderId ? [folderId] : [],
-    };
-
-    await Storage.saveNote(note);
-    await loadNotes();
-    return note;
-  }, [loadNotes]);
-
-  const updateNote = useCallback(async (id: string, content: string) => {
-    const existing = await Storage.getNote(id);
-    if (!existing) return;
-
-    await Storage.saveNote({
-      ...existing,
-      content,
-      updatedAt: new Date().toISOString(),
-    });
-
-    await loadNotes();
-  }, [loadNotes]);
-
-  const removeNote = useCallback(async (id: string) => {
-    const existing = await Storage.getNote(id);
-    if (!existing) return;
-
-    await Storage.saveNote({
-      ...existing,
-      isDeleted: true,
-      isPinned: false,
-      updatedAt: new Date().toISOString(),
-    });
-
-    await loadNotes();
-  }, [loadNotes]);
-
-  const restoreNote = useCallback(async (id: string) => {
-    const existing = await Storage.getNote(id);
-    if (!existing) return;
-
-    await Storage.saveNote({
-      ...existing,
-      isDeleted: false,
-      updatedAt: new Date().toISOString(),
-    });
-
-    await loadNotes();
-  }, [loadNotes]);
-
-  const permanentlyDeleteNote = useCallback(async (id: string) => {
-    await Storage.deleteNote(id);
-    await loadNotes();
-  }, [loadNotes]);
-
-  const toggleNoteStar = useCallback(async (id: string) => {
-    await Storage.toggleStar(id);
-    await loadNotes();
-  }, [loadNotes]);
-
-  const toggleNotePin = useCallback(async (id: string) => {
-    await Storage.togglePin(id);
-    await loadNotes();
-  }, [loadNotes]);
-
-  const createFolder = useCallback(async (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-
-    const nextFolders = [
-      ...folders,
-      {
+  const createNote = useCallback(
+    async (content: string, folderId?: string) => {
+      const now = new Date().toISOString();
+      const note: Note = {
         id: generateId(),
-        name: trimmed,
-        createdAt: new Date().toISOString(),
-      },
-    ];
+        content,
+        createdAt: now,
+        updatedAt: now,
+        isPinned: false,
+        isStarred: false,
+        isDeleted: false,
+        folderIds: folderId ? [folderId] : [],
+      };
 
-    await Storage.saveFolders(nextFolders);
-    setFolders(nextFolders);
-  }, [folders]);
+      await Storage.saveNote(note);
+      await loadNotes();
+      return note;
+    },
+    [loadNotes]
+  );
 
-  const renameFolder = useCallback(async (id: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
+  const updateNote = useCallback(
+    async (id: string, content: string) => {
+      const existing = await Storage.getNote(id);
+      if (!existing) return;
 
-    const nextFolders = folders.map((folder) =>
-      folder.id === id ? { ...folder, name: trimmed } : folder
-    );
+      await Storage.saveNote({
+        ...existing,
+        content,
+        updatedAt: new Date().toISOString(),
+      });
 
-    await Storage.saveFolders(nextFolders);
-    setFolders(nextFolders);
-  }, [folders]);
+      await loadNotes();
+    },
+    [loadNotes]
+  );
 
-  const deleteFolder = useCallback(async (id: string) => {
-    const nextFolders = folders.filter((folder) => folder.id !== id);
-    const allNotes = await Storage.getAllNotes();
-    const updatedNotes = allNotes.map((note) => ({
-      ...note,
-      folderIds: note.folderIds.filter((folderId) => folderId !== id),
-    }));
+  const removeNote = useCallback(
+    async (id: string) => {
+      const existing = await Storage.getNote(id);
+      if (!existing) return;
 
-    await Promise.all([
-      Storage.saveFolders(nextFolders),
-      Storage.saveNotes(updatedNotes),
-    ]);
+      await Storage.saveNote({
+        ...existing,
+        isDeleted: true,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+      });
 
-    setFolders(nextFolders);
-    await loadNotes();
-  }, [folders, loadNotes]);
+      await loadNotes();
+    },
+    [loadNotes]
+  );
 
-  const toggleNoteFolder = useCallback(async (noteId: string, folderId: string) => {
-    const existing = await Storage.getNote(noteId);
-    if (!existing) return;
+  const restoreNote = useCallback(
+    async (id: string) => {
+      const existing = await Storage.getNote(id);
+      if (!existing) return;
 
-    const hasFolder = existing.folderIds.includes(folderId);
-    const folderIds = hasFolder
-      ? existing.folderIds.filter((id) => id !== folderId)
-      : [...existing.folderIds, folderId];
+      await Storage.saveNote({
+        ...existing,
+        isDeleted: false,
+        updatedAt: new Date().toISOString(),
+      });
 
-    await Storage.saveNote({
-      ...existing,
-      folderIds,
-      updatedAt: new Date().toISOString(),
-    });
+      await loadNotes();
+    },
+    [loadNotes]
+  );
 
-    await loadNotes();
-  }, [loadNotes]);
+  const permanentlyDeleteNote = useCallback(
+    async (id: string) => {
+      const deletedAt = new Date().toISOString();
+      await Promise.all([Storage.deleteNote(id), Storage.upsertTombstone({ id, deletedAt })]);
+      setTombstones((prev) => {
+        const exists = prev.some((item) => item.id === id);
+        if (!exists) return [...prev, { id, deletedAt }];
+        return prev.map((item) => (item.id === id ? { id, deletedAt } : item));
+      });
+      await loadNotes();
+    },
+    [loadNotes]
+  );
+
+  const toggleNoteStar = useCallback(
+    async (id: string) => {
+      await Storage.toggleStar(id);
+      await loadNotes();
+    },
+    [loadNotes]
+  );
+
+  const toggleNotePin = useCallback(
+    async (id: string) => {
+      await Storage.togglePin(id);
+      await loadNotes();
+    },
+    [loadNotes]
+  );
+
+  const createFolder = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+
+      const now = new Date().toISOString();
+      const nextFolders = [
+        ...folders,
+        {
+          id: generateId(),
+          name: trimmed,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+
+      await Storage.saveFolders(nextFolders);
+      setFolders(nextFolders);
+    },
+    [folders]
+  );
+
+  const renameFolder = useCallback(
+    async (id: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+
+      const now = new Date().toISOString();
+      const nextFolders = folders.map((folder) =>
+        folder.id === id ? { ...folder, name: trimmed, updatedAt: now } : folder
+      );
+
+      await Storage.saveFolders(nextFolders);
+      setFolders(nextFolders);
+    },
+    [folders]
+  );
+
+  const deleteFolder = useCallback(
+    async (id: string) => {
+      const now = new Date().toISOString();
+      const nextFolders = folders.filter((folder) => folder.id !== id);
+      const allNotes = await Storage.getAllNotes();
+      const updatedNotes = allNotes.map((note) => {
+        if (!note.folderIds.includes(id)) return note;
+        return {
+          ...note,
+          folderIds: note.folderIds.filter((folderId) => folderId !== id),
+          updatedAt: now,
+        };
+      });
+
+      await Promise.all([Storage.saveFolders(nextFolders), Storage.saveNotes(updatedNotes)]);
+
+      setFolders(nextFolders);
+      await loadNotes();
+    },
+    [folders, loadNotes]
+  );
+
+  const toggleNoteFolder = useCallback(
+    async (noteId: string, folderId: string) => {
+      const existing = await Storage.getNote(noteId);
+      if (!existing) return;
+
+      const hasFolder = existing.folderIds.includes(folderId);
+      const folderIds = hasFolder
+        ? existing.folderIds.filter((id) => id !== folderId)
+        : [...existing.folderIds, folderId];
+
+      await Storage.saveNote({
+        ...existing,
+        folderIds,
+        updatedAt: new Date().toISOString(),
+      });
+
+      await loadNotes();
+    },
+    [loadNotes]
+  );
 
   const saveGitHubConfigFn = useCallback(async (config: GitHubConfig) => {
     const valid = await GitHub.validateToken(config);
@@ -240,9 +317,39 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
     setGithubConfig(null);
   }, []);
 
+  const saveWebDAVConfigFn = useCallback(async (config: WebDAVConfig) => {
+    const normalized: WebDAVConfig = {
+      serverUrl: config.serverUrl.trim(),
+      username: config.username.trim(),
+      password: config.password,
+      fileName: (config.fileName || '').trim() || 'a-note-sync.json',
+    };
+    const valid = await WebDAV.validateConfig(normalized);
+    if (!valid) throw new Error('Invalid WebDAV configuration');
+
+    await WebDAV.saveWebDAVConfig(normalized);
+    setWebDAVConfig(normalized);
+  }, []);
+
+  const clearWebDAVConfigFn = useCallback(async () => {
+    await WebDAV.clearWebDAVConfig();
+    setWebDAVConfig(null);
+  }, []);
+
+  const setSyncProvider = useCallback(async (provider: SyncProvider) => {
+    setSyncProviderState(provider);
+    await AsyncStorage.setItem(SYNC_PROVIDER_KEY, provider);
+  }, []);
+
   const syncWithGitHub = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
-    if (!githubConfig) {
+    const syncingGitHub = syncProvider === 'github';
+    if (syncingGitHub && !githubConfig) {
       const error = 'GitHub is not configured';
+      setSyncState({ status: 'error', error });
+      return { ok: false, error };
+    }
+    if (!syncingGitHub && !webdavConfig) {
+      const error = 'WebDAV is not configured';
       setSyncState({ status: 'error', error });
       return { ok: false, error };
     }
@@ -250,9 +357,31 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
     setSyncState({ status: 'syncing' });
 
     try {
-      const localNotes = await Storage.getAllNotes();
-      const merged = await GitHub.syncNotes(githubConfig, localNotes);
-      await Storage.saveNotes(merged);
+      const [localNotes, localFolders, localTombstones] = await Promise.all([
+        Storage.getAllNotes(),
+        Storage.getFolders(),
+        Storage.getTombstones(),
+      ]);
+      const merged = syncingGitHub
+        ? await GitHub.syncData(
+            githubConfig as GitHubConfig,
+            localNotes,
+            localFolders,
+            localTombstones
+          )
+        : await WebDAV.syncData(
+            webdavConfig as WebDAVConfig,
+            localNotes,
+            localFolders,
+            localTombstones
+          );
+      await Promise.all([
+        Storage.saveNotes(merged.notes),
+        Storage.saveFolders(merged.folders),
+        Storage.saveTombstones(merged.tombstones),
+      ]);
+      setFolders(merged.folders);
+      setTombstones(merged.tombstones);
       await loadNotes();
       setSyncState({ status: 'success', lastSyncAt: new Date().toISOString() });
       return { ok: true };
@@ -261,7 +390,7 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       setSyncState({ status: 'error', error: message });
       return { ok: false, error: message };
     }
-  }, [githubConfig, loadNotes]);
+  }, [githubConfig, webdavConfig, syncProvider, loadNotes]);
 
   const value = useMemo(
     () => ({
@@ -270,8 +399,11 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       loading,
       searchQuery,
       syncState,
+      syncProvider,
       githubConfig,
+      webdavConfig,
       setSearchQuery,
+      setSyncProvider,
       loadNotes,
       createNote,
       updateNote,
@@ -287,6 +419,8 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       syncWithGitHub,
       saveGitHubConfig: saveGitHubConfigFn,
       clearGitHubConfig: clearGitHubConfigFn,
+      saveWebDAVConfig: saveWebDAVConfigFn,
+      clearWebDAVConfig: clearWebDAVConfigFn,
     }),
     [
       notes,
@@ -294,7 +428,9 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       loading,
       searchQuery,
       syncState,
+      syncProvider,
       githubConfig,
+      webdavConfig,
       loadNotes,
       createNote,
       updateNote,
@@ -310,6 +446,9 @@ export function NotesProvider({ children }: { children: React.ReactNode }) {
       syncWithGitHub,
       saveGitHubConfigFn,
       clearGitHubConfigFn,
+      saveWebDAVConfigFn,
+      clearWebDAVConfigFn,
+      setSyncProvider,
     ]
   );
 

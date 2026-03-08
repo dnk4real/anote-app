@@ -53,7 +53,8 @@ export default function RootLayout() {
               headerShown: false,
               contentStyle: { backgroundColor: blankBackground },
               presentation: 'card',
-              animation: 'slide_from_right',
+              animation: 'ios_from_right',
+              animationDuration: 333,
               freezeOnBlur: false,
             }}
           >

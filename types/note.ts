@@ -2,6 +2,7 @@ export interface Folder {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Note {
@@ -20,6 +21,20 @@ export interface GitHubConfig {
   token: string;
   repo: string;
   branch: string;
+}
+
+export interface WebDAVConfig {
+  serverUrl: string;
+  username: string;
+  password: string;
+  fileName: string;
+}
+
+export type SyncProvider = 'github' | 'webdav';
+
+export interface NoteTombstone {
+  id: string;
+  deletedAt: string;
 }
 
 export interface SyncState {

@@ -24,6 +24,7 @@ export default function HomeScreen() {
     notes,
     folders,
     loading,
+    syncProvider,
     searchQuery,
     setSearchQuery,
     createNote,
@@ -154,9 +155,9 @@ export default function HomeScreen() {
 
     if (syncNoticeTimerRef.current) clearTimeout(syncNoticeTimerRef.current);
     if (result.ok) {
-      setSyncNotice({ type: 'success', text: 'GitHub sync successful' });
+      setSyncNotice({ type: 'success', text: `${syncProvider === 'github' ? 'GitHub' : 'WebDAV'} sync successful` });
     } else {
-      setSyncNotice({ type: 'error', text: result.error || 'GitHub sync failed' });
+      setSyncNotice({ type: 'error', text: result.error || `${syncProvider === 'github' ? 'GitHub' : 'WebDAV'} sync failed` });
     }
     syncNoticeTimerRef.current = setTimeout(() => setSyncNotice(null), 1800);
   }
@@ -413,10 +414,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   noteDeleteAction: {
-    width: 68,
+    width: 72,
     height: 42,
-    marginLeft: 8,
-    marginRight: Spacing.xl,
+    marginLeft: 6,
+    marginRight: 22,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
