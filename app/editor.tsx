@@ -36,8 +36,7 @@ type WebMessage =
   | { type: 'plainText'; payload: string }
   | { type: 'formatState'; payload: FormatState }
   | { type: 'contentSnapshot'; payload: string }
-  | { type: 'editorFocus'; payload: boolean }
-  | { type: 'keyboardVisible'; payload: boolean };
+  | { type: 'editorFocused'; payload: boolean };
 
 function isFormatState(value: unknown): value is FormatState {
   if (!value || typeof value !== 'object') return false;
@@ -56,6 +55,9 @@ function stripHtml(html: string): string {
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&#160;/g, ' ')
+    .replace(/&#8203;|&#8204;|&#8205;|&#65279;/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -64,13 +66,21 @@ function getCharCount(html: string): number {
   return stripHtml(html).replace(/\s+/g, '').length;
 }
 
+function hasMeaningfulNoteContent(content: string): boolean {
+  const html = String(content || '');
+  const hasMedia = /<(img|video|audio|iframe|svg|canvas)\b/i.test(html);
+  const text = stripHtml(html).replace(/\s+/g, '').trim();
+  return hasMedia || text.length > 0;
+}
+
 function makeEditorDocument(
   initialHtml: string,
   background: string,
   textColor: string,
   hintColor: string,
   fontFaceCss: string,
-  fontFamily: string
+  fontFamily: string,
+  autoFocusOnLoad: boolean
 ): string {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
@@ -86,6 +96,7 @@ function makeEditorDocument(
     padding: 30px 27px 168px 30px;
     line-height: 1.68;
     font-size: 16px;
+    caret-color: ${textColor};
     outline: none;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -116,16 +127,120 @@ function makeEditorDocument(
   #editor b, #editor strong {
     font-weight: 700;
   }
+  #editor .bridge-caret {
+    display: inline-block;
+    width: 1.5px;
+    height: 1.05em;
+    margin-left: 1px;
+    vertical-align: -0.12em;
+    background: ${textColor};
+    animation: bridge-caret-blink 1s steps(1) infinite;
+    pointer-events: none;
+    user-select: none;
+  }
+  @keyframes bridge-caret-blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
 </style></head>
 <body>
 <div id="editor" contenteditable="true">${initialHtml}</div>
 <script>
   const editor = document.getElementById('editor');
   let snapshotTimer = null;
-  let baseViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  let autoFocusCancelled = false;
+  let bridgeCaretSuppressed = false;
+  const BRIDGE_CARET_SELECTOR = 'span[data-bridge-caret="1"]';
 
   const emit = (type, payload) => {
     window.ReactNativeWebView.postMessage(JSON.stringify({ type, payload }));
+  };
+
+  const snapshotHtml = () => {
+    const clone = editor.cloneNode(true);
+    const caret = clone.querySelector(BRIDGE_CARET_SELECTOR);
+    if (caret && caret.parentNode) {
+      caret.parentNode.removeChild(caret);
+    }
+    return clone.innerHTML;
+  };
+
+  const ensureBridgeCaret = () => {
+    if (bridgeCaretSuppressed) return null;
+    let caret = editor.querySelector(BRIDGE_CARET_SELECTOR);
+    if (caret) return caret;
+
+    caret = document.createElement('span');
+    caret.setAttribute('data-bridge-caret', '1');
+    caret.setAttribute('contenteditable', 'false');
+    caret.className = 'bridge-caret';
+    editor.appendChild(caret);
+    return caret;
+  };
+
+  const removeBridgeCaret = () => {
+    const caret = editor.querySelector(BRIDGE_CARET_SELECTOR);
+    if (caret && caret.parentNode) {
+      caret.parentNode.removeChild(caret);
+    }
+  };
+
+  const placeSelectionBeforeBridgeCaret = () => {
+    const caret = ensureBridgeCaret();
+    if (!caret) return null;
+    const selection = window.getSelection && window.getSelection();
+    if (selection && document.createRange) {
+      const range = document.createRange();
+      range.setStartBefore(caret);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    return caret;
+  };
+
+  const syncBridgeCaretToSelection = () => {
+    if (bridgeCaretSuppressed) return null;
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || !selection.rangeCount || !document.createRange) {
+      return placeSelectionBeforeBridgeCaret();
+    }
+
+    const range = selection.getRangeAt(0);
+    const container = range.startContainer.nodeType === Node.TEXT_NODE
+      ? range.startContainer.parentNode
+      : range.startContainer;
+
+    if (container && container !== editor && !editor.contains(container)) {
+      return placeSelectionBeforeBridgeCaret();
+    }
+
+    const caret = ensureBridgeCaret();
+    const nextRange = range.cloneRange();
+    nextRange.collapse(true);
+
+    if (caret.parentNode) {
+      caret.parentNode.removeChild(caret);
+    }
+
+    nextRange.insertNode(caret);
+
+    const collapsedRange = document.createRange();
+    collapsedRange.setStartBefore(caret);
+    collapsedRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(collapsedRange);
+    return caret;
+  };
+
+  const suppressBridgeCaret = () => {
+    bridgeCaretSuppressed = true;
+    removeBridgeCaret();
+  };
+
+  const restoreBridgeCaret = () => {
+    bridgeCaretSuppressed = false;
+    return ensureBridgeCaret();
   };
 
   const readState = () => {
@@ -137,23 +252,6 @@ function makeEditorDocument(
       list: document.queryCommandState('insertUnorderedList'),
       quote: formatBlock === 'blockquote',
     });
-  };
-
-  const emitFocus = () => {
-    emit('editorFocus', document.activeElement === editor);
-  };
-
-  const emitKeyboardVisible = () => {
-    const currentViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-    const isFocused = document.activeElement === editor;
-
-    if (!isFocused && currentViewportHeight > baseViewportHeight - 2) {
-      baseViewportHeight = currentViewportHeight;
-    }
-
-    const delta = baseViewportHeight - currentViewportHeight;
-    const visible = isFocused && delta > 100;
-    emit('keyboardVisible', visible);
   };
 
   window.__editorApply = (kind) => {
@@ -180,47 +278,143 @@ function makeEditorDocument(
   };
 
   editor.addEventListener('input', () => {
+    autoFocusCancelled = true;
     clearTimeout(snapshotTimer);
     snapshotTimer = setTimeout(() => {
-      emit('contentSnapshot', editor.innerHTML);
+      emit('contentSnapshot', snapshotHtml());
     }, 600);
   });
   editor.addEventListener('focus', () => {
-    emitFocus();
-    setTimeout(emitKeyboardVisible, 40);
+    readState();
+    emit('editorFocused', true);
   });
-  editor.addEventListener('blur', () => {
-    emitFocus();
-    setTimeout(emitKeyboardVisible, 0);
-  });
+  editor.addEventListener('blur', readState);
+  editor.addEventListener('mouseup', () => setTimeout(suppressBridgeCaret, 0));
+  editor.addEventListener('keyup', () => setTimeout(suppressBridgeCaret, 0));
+  editor.addEventListener('touchend', () => setTimeout(suppressBridgeCaret, 0));
 
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', emitKeyboardVisible);
-  }
-  window.addEventListener('resize', emitKeyboardVisible);
-
-  window.__snapshot = () => emit('contentSnapshot', editor.innerHTML);
+  window.__snapshot = () => emit('contentSnapshot', snapshotHtml());
   window.__readText = () => emit('plainText', editor.innerText);
   window.__dismissInput = () => {
+    suppressBridgeCaret();
     if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
     }
     editor.blur();
-    emitFocus();
-    emit('keyboardVisible', false);
+  };
+  window.__removeBridgeCaret = () => {
+    suppressBridgeCaret();
+  };
+  window.__restoreBridgeCaret = () => {
+    restoreBridgeCaret();
+  };
+  window.__focusEditor = () => {
+    if (!bridgeCaretSuppressed) {
+      restoreBridgeCaret();
+    }
+    try { editor.click(); } catch (e) {}
+    try {
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+      editor.dispatchEvent(ev);
+    } catch (e) {}
+    try { editor.focus({ preventScroll: true }); } catch (e) { editor.focus(); }
+    if (!bridgeCaretSuppressed) {
+      placeSelectionBeforeBridgeCaret();
+    }
+    const focused = document.activeElement === editor;
+    if (focused) emit('editorFocused', true);
+    return focused;
   };
   window.__insertImage = (uri) => {
     if (!uri) return;
     const safeUri = String(uri).replace(/"/g, '&quot;');
+    if (!bridgeCaretSuppressed) {
+      placeSelectionBeforeBridgeCaret();
+    }
     document.execCommand('insertHTML', false, '<div><img src="' + safeUri + '" style="max-width:100%;height:auto;border-radius:8px;display:block;margin:8px 0;" /></div>');
-    emit('contentSnapshot', editor.innerHTML);
+    if (!bridgeCaretSuppressed) {
+      placeSelectionBeforeBridgeCaret();
+    }
+    emit('contentSnapshot', snapshotHtml());
     readState();
     editor.focus();
   };
+  window.__insertText = (text) => {
+    const value = String(text || '');
+    if (!value) return;
+    if (window.__focusEditor) window.__focusEditor();
+    try {
+      document.execCommand('insertText', false, value);
+    } catch (e) {
+      const caret = placeSelectionBeforeBridgeCaret();
+      if (caret) {
+        caret.insertAdjacentText('beforebegin', value);
+      } else {
+        editor.appendChild(document.createTextNode(value));
+      }
+    }
+    if (!bridgeCaretSuppressed) {
+      placeSelectionBeforeBridgeCaret();
+    }
+    emit('contentSnapshot', snapshotHtml());
+    readState();
+  };
+  window.__deleteBackward = () => {
+    if (window.__deleteBackwardCount) {
+      window.__deleteBackwardCount(1);
+      return;
+    }
+    if (window.__focusEditor) window.__focusEditor();
+    try {
+      document.execCommand('delete', false);
+    } catch (e) {
+      // ignore
+    }
+    placeSelectionBeforeBridgeCaret();
+    emit('contentSnapshot', snapshotHtml());
+    readState();
+  };
+  window.__deleteBackwardCount = (count) => {
+    const total = Math.max(1, Number(count) || 1);
+    if (window.__focusEditor) window.__focusEditor();
+    const selection = window.getSelection && window.getSelection();
+
+    for (let i = 0; i < total; i += 1) {
+      if (selection && typeof selection.modify === 'function') {
+        selection.modify('extend', 'backward', 'character');
+        document.execCommand('delete', false);
+      } else {
+        try {
+          document.execCommand('delete', false);
+        } catch (e) {
+          // ignore
+        }
+      }
+      if (!bridgeCaretSuppressed) {
+        placeSelectionBeforeBridgeCaret();
+      }
+    }
+
+    emit('contentSnapshot', snapshotHtml());
+    readState();
+  };
 
   setTimeout(readState, 0);
-  setTimeout(emitFocus, 0);
-  setTimeout(emitKeyboardVisible, 0);
+  if (${autoFocusOnLoad ? 'true' : 'false'}) {
+    let bootTries = 0;
+    const bootFocus = () => {
+      if (autoFocusCancelled) return;
+      bootTries += 1;
+      if (window.__focusEditor) {
+        window.__focusEditor();
+      } else {
+        editor.focus();
+      }
+      if (document.activeElement === editor) return;
+      if (bootTries < 6) setTimeout(bootFocus, 120);
+    };
+    setTimeout(bootFocus, 30);
+  }
 </script></body></html>`;
 }
 
@@ -229,12 +423,13 @@ export default function EditorScreen() {
   const colors = Colors[colorScheme];
   const { editorFontFaceCss, editorFontFamily, fontPreset } = useFontSettings();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, autoFocus } = useLocalSearchParams<{ id: string; autoFocus?: string }>();
   const {
     notes,
     folders,
     updateNote,
     removeNote,
+    permanentlyDeleteNote,
     toggleNoteStar,
     toggleNoteFolder,
     createFolder,
@@ -243,13 +438,21 @@ export default function EditorScreen() {
   const note = useMemo(() => notes.find((item) => item.id === id), [id, notes]);
   const noteId = note?.id;
   const noteContent = note?.content ?? '';
+  const shouldAutoFocusParam = useMemo(() => {
+    const value = Array.isArray(autoFocus) ? autoFocus[0] : autoFocus;
+    return value === '1' || value === 'true';
+  }, [autoFocus]);
 
   const webviewRef = useRef<WebView>(null);
+  const keyboardBridgeInputRef = useRef<TextInput>(null);
+  const webviewLoadedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotResolverRef = useRef<((html: string) => void) | null>(null);
   const isLeavingRef = useRef(false);
   const contentRef = useRef(noteContent);
   const loadedNoteIdRef = useRef<string | null>(null);
+  const noteIdRef = useRef<string | null>(null);
+  const deletingEmptyRef = useRef(false);
 
   const [shareOpen, setShareOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
@@ -258,6 +461,7 @@ export default function EditorScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [editorInitialHtml, setEditorInitialHtml] = useState(noteContent);
   const [charCount, setCharCount] = useState(getCharCount(noteContent));
+  const [bridgeValue, setBridgeValue] = useState('');
   const [formats, setFormats] = useState<FormatState>({
     bold: false,
     italic: false,
@@ -265,6 +469,7 @@ export default function EditorScreen() {
     list: false,
     quote: false,
   });
+  const shouldAutoFocusRef = useRef(false);
 
   const editorSource = useMemo(
     () => ({
@@ -274,11 +479,24 @@ export default function EditorScreen() {
         colors.textPrimary,
         colors.textTertiary,
         editorFontFaceCss,
-        editorFontFamily
+        editorFontFamily,
+        shouldAutoFocusParam
       ),
     }),
-    [editorInitialHtml, colors.background, colors.textPrimary, colors.textTertiary, editorFontFaceCss, editorFontFamily]
+    [
+      editorInitialHtml,
+      colors.background,
+      colors.textPrimary,
+      colors.textTertiary,
+      editorFontFaceCss,
+      editorFontFamily,
+      shouldAutoFocusParam,
+    ]
   );
+
+  useEffect(() => {
+    noteIdRef.current = noteId ?? null;
+  }, [noteId]);
 
   useEffect(() => {
     if (!noteId) return;
@@ -288,7 +506,23 @@ export default function EditorScreen() {
     contentRef.current = noteContent;
     setEditorInitialHtml(noteContent);
     setCharCount(getCharCount(noteContent));
+    setBridgeValue('');
   }, [noteId, noteContent]);
+
+  const deleteNoteIfEmpty = useCallback(async (): Promise<boolean> => {
+    const targetNoteId = noteIdRef.current;
+    if (!targetNoteId) return false;
+    if (deletingEmptyRef.current) return false;
+    if (hasMeaningfulNoteContent(contentRef.current)) return false;
+
+    deletingEmptyRef.current = true;
+    try {
+      await permanentlyDeleteNote(targetNoteId);
+      return true;
+    } finally {
+      deletingEmptyRef.current = false;
+    }
+  }, [permanentlyDeleteNote]);
 
   useEffect(() => {
     const onShow = Keyboard.addListener('keyboardDidShow', (event) => {
@@ -299,6 +533,7 @@ export default function EditorScreen() {
     const onHide = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardHeight(0);
       setKeyboardVisible(false);
+      webviewRef.current?.injectJavaScript('window.__removeBridgeCaret && window.__removeBridgeCaret(); true;');
     });
 
     return () => {
@@ -327,6 +562,9 @@ export default function EditorScreen() {
     if (!options?.silentUi) {
       setCharCount(getCharCount(latestHtml));
     }
+    if (!hasMeaningfulNoteContent(latestHtml)) {
+      return;
+    }
     await updateNote(note.id, latestHtml);
   }, [note, updateNote]);
 
@@ -341,6 +579,13 @@ export default function EditorScreen() {
   async function handleBack() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     isLeavingRef.current = true;
+    await captureContent();
+    const deleted = await deleteNoteIfEmpty();
+    if (deleted || !noteIdRef.current) {
+      router.replace('/(tabs)');
+      return;
+    }
+
     router.replace('/(tabs)');
     setTimeout(() => {
       saveNow({ silentUi: true });
@@ -351,6 +596,81 @@ export default function EditorScreen() {
     webviewRef.current?.injectJavaScript(`window.__editorApply('${kind}'); true;`);
     scheduleSave();
   }
+
+  const triggerAutoFocus = useCallback(() => {
+    if (!webviewLoadedRef.current) return;
+    if (!shouldAutoFocusRef.current) return;
+    shouldAutoFocusRef.current = false;
+    keyboardBridgeInputRef.current?.focus();
+    (webviewRef.current as unknown as { focus?: () => void })?.focus?.();
+
+    setTimeout(() => {
+      webviewRef.current?.injectJavaScript(`
+        (function () {
+          var tries = 0;
+          var focusOnce = function () {
+            if (window.__focusEditor) window.__focusEditor();
+          };
+          focusOnce();
+          var timer = setInterval(function () {
+            tries += 1;
+            focusOnce();
+            if (tries >= 15) clearInterval(timer);
+          }, 90);
+        })();
+        true;
+      `);
+    }, 40);
+  }, []);
+
+  const handleBridgeTextChange = useCallback((text: string) => {
+    const previous = bridgeValue;
+    const next = text;
+
+    let sharedPrefixLength = 0;
+    const maxPrefixLength = Math.min(previous.length, next.length);
+    while (
+      sharedPrefixLength < maxPrefixLength &&
+      previous[sharedPrefixLength] === next[sharedPrefixLength]
+    ) {
+      sharedPrefixLength += 1;
+    }
+
+    const deletedCount = previous.length - sharedPrefixLength;
+    const insertedText = next.slice(sharedPrefixLength);
+
+    if (deletedCount > 0) {
+      webviewRef.current?.injectJavaScript(
+        `window.__deleteBackwardCount && window.__deleteBackwardCount(${deletedCount}); true;`
+      );
+    }
+
+    if (insertedText) {
+      webviewRef.current?.injectJavaScript(
+        `window.__insertText && window.__insertText(${JSON.stringify(insertedText)}); true;`
+      );
+      webviewRef.current?.injectJavaScript('window.__focusEditor && window.__focusEditor(); true;');
+    }
+
+    setBridgeValue(next);
+  }, [bridgeValue]);
+
+  const handleBridgeKeyPress = useCallback((event: { nativeEvent: { key: string } }) => {
+    if (event.nativeEvent.key !== 'Backspace') return;
+    if (bridgeValue.length > 0) return;
+    webviewRef.current?.injectJavaScript('window.__deleteBackward && window.__deleteBackward(); true;');
+  }, [bridgeValue]);
+
+  useEffect(() => {
+    if (!shouldAutoFocusParam) return;
+    shouldAutoFocusRef.current = true;
+    triggerAutoFocus();
+  }, [shouldAutoFocusParam, triggerAutoFocus]);
+
+  const handleEditorLoadEnd = useCallback(() => {
+    webviewLoadedRef.current = true;
+    triggerAutoFocus();
+  }, [triggerAutoFocus]);
 
   async function handleInsertImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -383,12 +703,30 @@ export default function EditorScreen() {
   async function handleConfirmSave() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     await captureContent();
+    if (!noteIdRef.current) return;
+    const deleted = await deleteNoteIfEmpty();
+    if (deleted) {
+      webviewRef.current?.injectJavaScript('window.__dismissInput && window.__dismissInput(); true;');
+      Keyboard.dismiss();
+      router.replace('/(tabs)');
+      return;
+    }
+
     await saveNow();
     setKeyboardVisible(false);
     setKeyboardHeight(0);
     webviewRef.current?.injectJavaScript('window.__dismissInput && window.__dismissInput(); true;');
     Keyboard.dismiss();
   }
+
+  useEffect(() => {
+    return () => {
+      if (hasMeaningfulNoteContent(contentRef.current)) return;
+      const targetNoteId = noteIdRef.current;
+      if (!targetNoteId) return;
+      void permanentlyDeleteNote(targetNoteId);
+    };
+  }, [permanentlyDeleteNote]);
 
   function onWebMessage(raw: string) {
     try {
@@ -433,17 +771,6 @@ export default function EditorScreen() {
         Share.share({ message: data.payload || '' });
       }
 
-      if (data.type === 'editorFocus' && typeof data.payload === 'boolean') {
-        if (!data.payload) {
-          setKeyboardVisible(false);
-          setKeyboardHeight(0);
-        }
-      }
-
-      if (data.type === 'keyboardVisible' && typeof data.payload === 'boolean') {
-        setKeyboardVisible(data.payload);
-        if (!data.payload) setKeyboardHeight(0);
-      }
     } catch {
       // ignore parse errors
     }
@@ -566,11 +893,22 @@ export default function EditorScreen() {
         ref={webviewRef}
         source={editorSource}
         onMessage={(event) => onWebMessage(event.nativeEvent.data)}
+        onLoadEnd={handleEditorLoadEnd}
         style={[styles.webview, { backgroundColor: colors.background }]}
         originWhitelist={['*']}
+        keyboardDisplayRequiresUserAction={false}
         allowFileAccess
         allowFileAccessFromFileURLs
         allowUniversalAccessFromFileURLs
+      />
+      <TextInput
+        ref={keyboardBridgeInputRef}
+        style={styles.keyboardBridgeInput}
+        value={bridgeValue}
+        autoCorrect={false}
+        autoCapitalize="none"
+        onChangeText={handleBridgeTextChange}
+        onKeyPress={handleBridgeKeyPress}
       />
 
       <View style={[styles.toolbarWrap, { bottom: toolbarBottom }]}> 
@@ -729,6 +1067,16 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
+  },
+  keyboardBridgeInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0.01,
+    left: 0,
+    top: 0,
+    padding: 0,
+    margin: 0,
   },
   toolbarWrap: {
     position: 'absolute',

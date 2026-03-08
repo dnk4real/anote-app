@@ -11,6 +11,8 @@ interface LongImagePalette {
 interface LongImageOptions {
   html: string;
   theme: LongImageTheme;
+  fontFaceCss?: string;
+  fontFamily?: string;
 }
 
 export interface LongImageBuildResult {
@@ -60,6 +62,10 @@ function sanitizeRichHtml(html: string): string {
 export function buildLongImage(options: LongImageOptions): LongImageBuildResult {
   const palette = LONG_IMAGE_THEME[options.theme];
   const contentHtml = sanitizeRichHtml(options.html) || '<div><br /></div>';
+  const fontFaceCss = options.fontFaceCss || '';
+  const fontFamily =
+    options.fontFamily ||
+    '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif';
 
   const html = `<!doctype html>
 <html>
@@ -67,6 +73,7 @@ export function buildLongImage(options: LongImageOptions): LongImageBuildResult 
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>
+    ${fontFaceCss}
     :root {
       color-scheme: ${options.theme};
     }
@@ -77,7 +84,7 @@ export function buildLongImage(options: LongImageOptions): LongImageBuildResult 
       background: ${palette.background};
       color: ${palette.body};
       overflow: hidden;
-      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+      font-family: ${fontFamily};
       -webkit-text-size-adjust: 100%;
       text-size-adjust: 100%;
       -webkit-font-smoothing: antialiased;
@@ -102,6 +109,12 @@ export function buildLongImage(options: LongImageOptions): LongImageBuildResult 
     #content * {
       box-sizing: border-box;
       max-width: 100%;
+    }
+    #content * {
+      font-family: inherit !important;
+      font-size: inherit !important;
+      line-height: inherit !important;
+      letter-spacing: inherit !important;
     }
     #content p,
     #content div,
@@ -139,11 +152,11 @@ export function buildLongImage(options: LongImageOptions): LongImageBuildResult 
     }
     #content b,
     #content strong {
-      font-weight: 700;
+      font-weight: 700 !important;
     }
     #content i,
     #content em {
-      font-style: italic;
+      font-style: italic !important;
     }
   </style>
 </head>

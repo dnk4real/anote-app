@@ -5,7 +5,7 @@ import { TextStyle } from 'react-native';
 
 const FONT_PRESET_KEY = '@a_note_font_preset';
 
-export type FontPreset = 'system' | 'source_han_sans' | 'source_han_serif' | 'glow_sans';
+export type FontPreset = 'system' | 'sarasa_gothic' | 'source_han_serif' | 'glow_sans';
 
 interface FontOption {
   id: FontPreset;
@@ -29,15 +29,15 @@ type FontAssetGroup = {
 
 const FONT_OPTIONS: FontOption[] = [
   { id: 'system', label: '系统' },
-  { id: 'source_han_sans', label: '更纱黑体' },
+  { id: 'sarasa_gothic', label: '更纱黑体' },
   { id: 'source_han_serif', label: '思源宋体' },
   { id: 'glow_sans', label: '未来荧黑' },
 ];
 
 const FONT_ASSETS: Record<Exclude<FontPreset, 'system'>, FontAssetGroup> = {
-  source_han_sans: {
-    regular: require('../assets/fonts/SarasaUiSC-Regular.ttf'),
-    bold: require('../assets/fonts/SarasaUiSC-Bold.ttf'),
+  sarasa_gothic: {
+    regular: require('../assets/fonts/SarasaGothicSC-Regular.ttf'),
+    bold: require('../assets/fonts/SarasaGothicSC-Bold.ttf'),
   },
   source_han_serif: {
     regular: require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
@@ -50,7 +50,7 @@ const FONT_ASSETS: Record<Exclude<FontPreset, 'system'>, FontAssetGroup> = {
 };
 
 const RN_FONT_FAMILY: Record<Exclude<FontPreset, 'system'>, { regular: string; bold: string }> = {
-  source_han_sans: { regular: 'SarasaUiSC-Regular', bold: 'SarasaUiSC-Bold' },
+  sarasa_gothic: { regular: 'SarasaGothicSC-Regular', bold: 'SarasaGothicSC-Bold' },
   source_han_serif: { regular: 'SourceHanSerifCN-Regular', bold: 'SourceHanSerifCN-Bold' },
   glow_sans: { regular: 'GlowSansSC-Regular', bold: 'GlowSansSC-Bold' },
 };
@@ -61,12 +61,13 @@ function toFontPreset(raw: string | null): FontPreset | null {
   if (!raw) return null;
 
   // Backward compatibility for old keys.
-  if (raw === 'sans') return 'source_han_sans';
+  if (raw === 'sans') return 'sarasa_gothic';
+  if (raw === 'source_han_sans') return 'sarasa_gothic';
   if (raw === 'serif') return 'source_han_serif';
 
   if (
     raw === 'system' ||
-    raw === 'source_han_sans' ||
+    raw === 'sarasa_gothic' ||
     raw === 'source_han_serif' ||
     raw === 'glow_sans'
   ) {

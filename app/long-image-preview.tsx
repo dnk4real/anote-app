@@ -6,6 +6,7 @@ import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDime
 import { captureRef } from 'react-native-view-shot';
 import { WebView } from 'react-native-webview';
 import { BorderRadius, Colors, Spacing, Typography } from '../constants/theme';
+import { useFontSettings } from '../contexts/FontContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useColorScheme } from '../hooks/use-color-scheme';
 import { buildLongImage, LongImageTheme } from '../utils/long-image';
@@ -42,6 +43,7 @@ export default function LongImagePreviewScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { editorFontFaceCss, editorFontFamily, fontPreset } = useFontSettings();
   const { width: screenWidth } = useWindowDimensions();
   const { notes } = useNotes();
 
@@ -57,8 +59,10 @@ export default function LongImagePreviewScreen() {
       buildLongImage({
         html: note?.content ?? '',
         theme,
+        fontFaceCss: editorFontFaceCss,
+        fontFamily: editorFontFamily,
       }),
-    [note?.content, theme]
+    [note?.content, theme, editorFontFaceCss, editorFontFamily]
   );
 
   const previewWidth = Math.max(300, Math.min(420, screenWidth - Spacing.lg * 2));
@@ -184,6 +188,7 @@ export default function LongImagePreviewScreen() {
           style={[styles.previewFrame, { width: previewWidth, height: previewHeight }]}
         >
           <WebView
+            key={`long-image-${theme}-${fontPreset}`}
             source={{ html: image.html }}
             style={styles.previewWebview}
             originWhitelist={['*']}
@@ -191,6 +196,10 @@ export default function LongImagePreviewScreen() {
             textZoom={100}
             injectedJavaScript={HEIGHT_REPORT_SCRIPT}
             onMessage={handleWebMessage}
+            mixedContentMode="always"
+            allowFileAccess
+            allowFileAccessFromFileURLs
+            allowUniversalAccessFromFileURLs
           />
         </View>
       </ScrollView>

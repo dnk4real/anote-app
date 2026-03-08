@@ -114,7 +114,7 @@ export default function HomeScreen() {
         : undefined;
 
     const note = await createNote('', targetFolder);
-    router.push({ pathname: '/editor', params: { id: note.id } });
+    router.push({ pathname: '/editor', params: { id: note.id, autoFocus: '1' } });
   }
 
   function getFolderLabel() {
