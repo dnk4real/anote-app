@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
+import { useCallback } from 'react';
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '../constants/theme';
 import { useColorScheme } from '../hooks/use-color-scheme';
@@ -25,13 +26,22 @@ const STEPS = [
 
 export default function GitHubSyncGuideScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+
+  const handleBack = useCallback(() => {
+    if (navigation.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/(tabs)/settings');
+  }, [navigation, router]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={() => router.replace('/(tabs)/settings')} style={styles.backBtn}>
+        <Pressable onPress={() => { void handleBack(); }} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
           <Text style={[Typography.bodySmall, { color: colors.textPrimary }]}>Back</Text>
         </Pressable>

@@ -2,6 +2,7 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '../constants/theme';
@@ -16,6 +17,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 export default function RootLayout() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const blankBackground = colorScheme === 'light' ? '#FAF7F2' : colors.background;
   const [fontsLoaded] = useFonts({
     'SarasaGothicSC-Regular': require('../assets/fonts/SarasaGothicSC-Regular.ttf'),
     'SarasaGothicSC-Bold': require('../assets/fonts/SarasaGothicSC-Bold.ttf'),
@@ -32,21 +34,27 @@ export default function RootLayout() {
     });
   }, [fontsLoaded]);
 
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(blankBackground).catch(() => {
+      // ignore system UI background failures
+    });
+  }, [blankBackground]);
+
   if (!fontsLoaded) {
     return null;
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: blankBackground }}>
       <FontProvider>
         <NotesProvider>
           <Stack
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: colors.background },
+              contentStyle: { backgroundColor: blankBackground },
               presentation: 'card',
               animation: 'slide_from_right',
-              freezeOnBlur: true,
+              freezeOnBlur: false,
             }}
           >
             <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />

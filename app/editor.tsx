@@ -1,5 +1,5 @@
 import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { format } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -423,6 +423,7 @@ export default function EditorScreen() {
   const colors = Colors[colorScheme];
   const { editorFontFaceCss, editorFontFamily, fontPreset } = useFontSettings();
   const router = useRouter();
+  const navigation = useNavigation();
   const { id, autoFocus } = useLocalSearchParams<{ id: string; autoFocus?: string }>();
   const {
     notes,
@@ -576,17 +577,25 @@ export default function EditorScreen() {
     }, 900);
   }, [note, saveNow]);
 
+  const goBackToMain = useCallback(() => {
+    if (navigation.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/(tabs)');
+  }, [navigation, router]);
+
   async function handleBack() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     isLeavingRef.current = true;
     await captureContent();
     const deleted = await deleteNoteIfEmpty();
     if (deleted || !noteIdRef.current) {
-      router.replace('/(tabs)');
+      goBackToMain();
       return;
     }
 
-    router.replace('/(tabs)');
+    goBackToMain();
     setTimeout(() => {
       saveNow({ silentUi: true });
     }, 420);
@@ -708,7 +717,7 @@ export default function EditorScreen() {
     if (deleted) {
       webviewRef.current?.injectJavaScript('window.__dismissInput && window.__dismissInput(); true;');
       Keyboard.dismiss();
-      router.replace('/(tabs)');
+      goBackToMain();
       return;
     }
 
@@ -779,7 +788,7 @@ export default function EditorScreen() {
   async function handleDelete() {
     if (!note) return;
     await removeNote(note.id);
-    router.replace('/(tabs)');
+    goBackToMain();
   }
 
   function handleCopy() {
@@ -900,6 +909,7 @@ export default function EditorScreen() {
         allowFileAccess
         allowFileAccessFromFileURLs
         allowUniversalAccessFromFileURLs
+        androidLayerType="software"
       />
       <TextInput
         ref={keyboardBridgeInputRef}
