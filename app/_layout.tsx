@@ -17,8 +17,8 @@ export default function RootLayout() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const [fontsLoaded] = useFonts({
-    'SourceHanSansCN-Regular': require('../assets/fonts/SourceHanSansCN-Regular.otf'),
-    'SourceHanSansCN-Bold': require('../assets/fonts/SourceHanSansCN-Bold.otf'),
+    'SarasaUiSC-Regular': require('../assets/fonts/SarasaUiSC-Regular.ttf'),
+    'SarasaUiSC-Bold': require('../assets/fonts/SarasaUiSC-Bold.ttf'),
     'SourceHanSerifCN-Regular': require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
     'SourceHanSerifCN-Bold': require('../assets/fonts/SourceHanSerifCN-Bold.otf'),
     'GlowSansSC-Regular': require('../assets/fonts/GlowSansSC-Regular.otf'),

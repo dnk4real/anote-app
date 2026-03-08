@@ -36,8 +36,8 @@ const FONT_OPTIONS: FontOption[] = [
 
 const FONT_ASSETS: Record<Exclude<FontPreset, 'system'>, FontAssetGroup> = {
   source_han_sans: {
-    regular: require('../assets/fonts/SourceHanSansCN-Regular.otf'),
-    bold: require('../assets/fonts/SourceHanSansCN-Bold.otf'),
+    regular: require('../assets/fonts/SarasaUiSC-Regular.ttf'),
+    bold: require('../assets/fonts/SarasaUiSC-Bold.ttf'),
   },
   source_han_serif: {
     regular: require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
@@ -50,7 +50,7 @@ const FONT_ASSETS: Record<Exclude<FontPreset, 'system'>, FontAssetGroup> = {
 };
 
 const RN_FONT_FAMILY: Record<Exclude<FontPreset, 'system'>, { regular: string; bold: string }> = {
-  source_han_sans: { regular: 'SourceHanSansCN-Regular', bold: 'SourceHanSansCN-Bold' },
+  source_han_sans: { regular: 'SarasaUiSC-Regular', bold: 'SarasaUiSC-Bold' },
   source_han_serif: { regular: 'SourceHanSerifCN-Regular', bold: 'SourceHanSerifCN-Bold' },
   glow_sans: { regular: 'GlowSansSC-Regular', bold: 'GlowSansSC-Bold' },
 };
@@ -102,13 +102,13 @@ function buildEditorFontConfig(preset: FontPreset): {
   const faceCss = `
     @font-face {
       font-family: '${family}';
-      src: url('${regularUri}') format('opentype');
+      src: url('${regularUri}');
       font-style: normal;
       font-weight: 400;
     }
     @font-face {
       font-family: '${family}';
-      src: url('${boldUri}') format('opentype');
+      src: url('${boldUri}');
       font-style: normal;
       font-weight: 700;
     }
