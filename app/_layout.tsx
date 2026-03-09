@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect } from 'react';
+import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '../constants/theme';
 import { FontProvider } from '../contexts/FontContext';
@@ -19,6 +20,10 @@ export default function RootLayout() {
   const colors = Colors[colorScheme];
   const blankBackground = colorScheme === 'light' ? '#FAF7F2' : colors.background;
   const [fontsLoaded] = useFonts({
+    ...Feather.font,
+    ...Ionicons.font,
+    ...MaterialCommunityIcons.font,
+    ...MaterialIcons.font,
     'SarasaGothicSC-Regular': require('../assets/fonts/SarasaGothicSC-Regular.ttf'),
     'SarasaGothicSC-Bold': require('../assets/fonts/SarasaGothicSC-Bold.ttf'),
     'SourceHanSerifCN-Regular': require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
@@ -62,6 +67,7 @@ export default function RootLayout() {
             <Stack.Screen name="editor" options={{ gestureEnabled: false }} />
             <Stack.Screen name="long-image-preview" options={{ gestureEnabled: false }} />
             <Stack.Screen name="github-sync-guide" options={{ gestureEnabled: false }} />
+            <Stack.Screen name="webdav-sync-guide" options={{ gestureEnabled: false }} />
           </Stack>
           <StatusBar style={colors.statusBar === 'dark-content' ? 'dark' : 'light'} />
         </NotesProvider>

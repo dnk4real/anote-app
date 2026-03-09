@@ -87,6 +87,13 @@ function buildShellText(html: string): string {
     .trim();
 }
 
+function splitShellParagraphs(text: string): string[] {
+  return String(text || '')
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function hasMeaningfulNoteContent(content: string): boolean {
   const html = String(content || '');
   const hasMedia = /<(img|video|audio|iframe|svg|canvas)\b/i.test(html);
@@ -178,13 +185,16 @@ function makeEditorDocument(
   let snapshotTimer = null;
   let autoFocusCancelled = false;
   let bridgeCaretSuppressed = false;
+  let lastBridgeLineBreakAt = 0;
   const BRIDGE_CARET_SELECTOR = 'span[data-bridge-caret="1"]';
+  const BLOCK_TAGS = new Set(['P', 'DIV', 'H2', 'UL', 'OL', 'BLOCKQUOTE', 'LI']);
 
   const emit = (type, payload) => {
     window.ReactNativeWebView.postMessage(JSON.stringify({ type, payload }));
   };
 
   const snapshotHtml = () => {
+    normalizeTopLevelBlocks();
     const clone = editor.cloneNode(true);
     const caret = clone.querySelector(BRIDGE_CARET_SELECTOR);
     if (caret && caret.parentNode) {
@@ -206,6 +216,61 @@ function makeEditorDocument(
     return caret;
   };
 
+  const isBridgeCaretNode = (node) => {
+    return (
+      node &&
+      node.nodeType === Node.ELEMENT_NODE &&
+      node.matches &&
+      node.matches(BRIDGE_CARET_SELECTOR)
+    );
+  };
+
+  const isBlockNode = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+    return BLOCK_TAGS.has(node.tagName);
+  };
+
+  const shouldWrapTopLevelNode = (node) => {
+    if (!node || isBridgeCaretNode(node)) return false;
+    if (node.nodeType === Node.TEXT_NODE) {
+      return Boolean((node.textContent || '').trim());
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    if (isBlockNode(node)) return false;
+    return true;
+  };
+
+  const normalizeTopLevelBlocks = () => {
+    const children = Array.from(editor.childNodes);
+    let wrapper = null;
+    children.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && !(node.textContent || '').trim()) {
+        editor.removeChild(node);
+        return;
+      }
+      if (shouldWrapTopLevelNode(node)) {
+        if (!wrapper) {
+          wrapper = document.createElement('div');
+          editor.insertBefore(wrapper, node);
+        }
+        wrapper.appendChild(node);
+        return;
+      }
+      wrapper = null;
+    });
+  };
+
+  const ensureCaretInsideBlock = () => {
+    const caret = ensureBridgeCaret();
+    if (!caret) return null;
+    if (caret.parentNode === editor) {
+      const block = document.createElement('div');
+      editor.insertBefore(block, caret);
+      block.appendChild(caret);
+    }
+    return caret;
+  };
+
   const removeBridgeCaret = () => {
     const caret = editor.querySelector(BRIDGE_CARET_SELECTOR);
     if (caret && caret.parentNode) {
@@ -214,7 +279,8 @@ function makeEditorDocument(
   };
 
   const placeSelectionBeforeBridgeCaret = () => {
-    const caret = ensureBridgeCaret();
+    normalizeTopLevelBlocks();
+    const caret = ensureCaretInsideBlock();
     if (!caret) return null;
     const selection = window.getSelection && window.getSelection();
     if (selection && document.createRange) {
@@ -240,6 +306,9 @@ function makeEditorDocument(
       : range.startContainer;
 
     if (container && container !== editor && !editor.contains(container)) {
+      return placeSelectionBeforeBridgeCaret();
+    }
+    if (container === editor) {
       return placeSelectionBeforeBridgeCaret();
     }
 
@@ -276,7 +345,7 @@ function makeEditorDocument(
     const heading = formatBlock === 'h2';
     emit('formatState', {
       heading,
-      bold: heading || document.queryCommandState('bold'),
+      bold: document.queryCommandState('bold'),
       italic: document.queryCommandState('italic'),
       center: document.queryCommandState('justifyCenter'),
       list: document.queryCommandState('insertUnorderedList'),
@@ -291,7 +360,10 @@ function makeEditorDocument(
         document.execCommand('formatBlock', false, 'div');
       } else {
         document.execCommand('formatBlock', false, 'h2');
-        document.execCommand('bold', false);
+        // bold is a toggle command; only enable it when currently off.
+        if (!document.queryCommandState('bold')) {
+          document.execCommand('bold', false);
+        }
       }
     }
     if (kind === 'bold') document.execCommand('bold', false);
@@ -382,6 +454,10 @@ function makeEditorDocument(
     const value = String(text || '');
     if (!value) return;
     if (window.__focusEditor) window.__focusEditor();
+    normalizeTopLevelBlocks();
+    if (!bridgeCaretSuppressed) {
+      placeSelectionBeforeBridgeCaret();
+    }
     try {
       document.execCommand('insertText', false, value);
     } catch (e) {
@@ -394,6 +470,40 @@ function makeEditorDocument(
     }
     if (!bridgeCaretSuppressed) {
       placeSelectionBeforeBridgeCaret();
+    }
+    emit('contentSnapshot', snapshotHtml());
+    readState();
+  };
+  window.__insertLineBreak = () => {
+    const now = Date.now();
+    // Some Android IMEs emit duplicate Enter events for one tap.
+    if (now - lastBridgeLineBreakAt < 140) {
+      return;
+    }
+    lastBridgeLineBreakAt = now;
+    if (window.__focusEditor) window.__focusEditor();
+    normalizeTopLevelBlocks();
+    const shouldManageBridgeCaret = !bridgeCaretSuppressed;
+    if (shouldManageBridgeCaret) {
+      placeSelectionBeforeBridgeCaret();
+      removeBridgeCaret();
+    }
+    let didInsert = false;
+    try {
+      didInsert = document.execCommand('insertParagraph', false);
+    } catch (e) {
+      didInsert = false;
+    }
+    if (!didInsert) {
+      try {
+        document.execCommand('insertHTML', false, '<br>');
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (shouldManageBridgeCaret) {
+      bridgeCaretSuppressed = false;
+      syncBridgeCaretToSelection();
     }
     emit('contentSnapshot', snapshotHtml());
     readState();
@@ -439,6 +549,7 @@ function makeEditorDocument(
   };
 
   setTimeout(() => {
+    normalizeTopLevelBlocks();
     readState();
     emit('contentSnapshot', snapshotHtml());
   }, 0);
@@ -519,6 +630,8 @@ export default function EditorScreen() {
     quote: false,
   });
   const shouldAutoFocusRef = useRef(false);
+  const lastEnterKeyPressAtRef = useRef(0);
+  const shellParagraphs = useMemo(() => splitShellParagraphs(editorShellText), [editorShellText]);
 
   const editorSource = useMemo(
     () => ({
@@ -726,9 +839,19 @@ export default function EditorScreen() {
     }, 40);
   }, []);
 
+  const injectBridgeLineBreak = useCallback(() => {
+    webviewRef.current?.injectJavaScript('window.__insertLineBreak && window.__insertLineBreak(); true;');
+    webviewRef.current?.injectJavaScript('window.__focusEditor && window.__focusEditor(); true;');
+  }, []);
+
+  const insertBridgeLineBreak = useCallback(() => {
+    injectBridgeLineBreak();
+    setBridgeValue('');
+  }, [injectBridgeLineBreak]);
+
   const handleBridgeTextChange = useCallback((text: string) => {
     const previous = bridgeValue;
-    const next = text;
+    const next = text.replace(/[\r\n]/g, '');
 
     let sharedPrefixLength = 0;
     const maxPrefixLength = Math.min(previous.length, next.length);
@@ -759,10 +882,19 @@ export default function EditorScreen() {
   }, [bridgeValue]);
 
   const handleBridgeKeyPress = useCallback((event: { nativeEvent: { key: string } }) => {
+    if (event.nativeEvent.key === 'Enter') {
+      const now = Date.now();
+      if (now - lastEnterKeyPressAtRef.current < 160) {
+        return;
+      }
+      lastEnterKeyPressAtRef.current = now;
+      insertBridgeLineBreak();
+      return;
+    }
     if (event.nativeEvent.key !== 'Backspace') return;
     if (bridgeValue.length > 0) return;
     webviewRef.current?.injectJavaScript('window.__deleteBackward && window.__deleteBackward(); true;');
-  }, [bridgeValue]);
+  }, [bridgeValue, insertBridgeLineBreak]);
 
   useEffect(() => {
     if (!shouldAutoFocusParam) return;
@@ -1024,17 +1156,31 @@ export default function EditorScreen() {
               { backgroundColor: colors.background, opacity: shellOpacityRef.current },
             ]}
           >
-            <Text
-              style={[
-                styles.editorShellText,
-                appFontStyle,
-                editorShellText
-                  ? { color: colors.textPrimary }
-                  : { color: colors.textTertiary },
-              ]}
-            >
-              {editorShellText || 'Start typing...'}
-            </Text>
+            {shellParagraphs.length === 0 ? (
+              <Text
+                style={[
+                  styles.editorShellText,
+                  appFontStyle,
+                  { color: colors.textTertiary },
+                ]}
+              >
+                Start typing...
+              </Text>
+            ) : (
+              shellParagraphs.map((paragraph, index) => (
+                <Text
+                  key={`shell-paragraph-${index}`}
+                  style={[
+                    styles.editorShellText,
+                    appFontStyle,
+                    { color: colors.textPrimary },
+                    index < shellParagraphs.length - 1 ? styles.editorShellParagraph : null,
+                  ]}
+                >
+                  {paragraph}
+                </Text>
+              ))
+            )}
           </Animated.View>
         )}
       </View>
@@ -1042,6 +1188,7 @@ export default function EditorScreen() {
         ref={keyboardBridgeInputRef}
         style={styles.keyboardBridgeInput}
         value={bridgeValue}
+        multiline
         autoCorrect={false}
         autoCapitalize="none"
         onChangeText={handleBridgeTextChange}
@@ -1226,6 +1373,9 @@ const styles = StyleSheet.create({
   editorShellText: {
     fontSize: 16,
     lineHeight: 27,
+  },
+  editorShellParagraph: {
+    marginBottom: 9,
   },
   keyboardBridgeInput: {
     position: 'absolute',
