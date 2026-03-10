@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AppDialog, { type AppDialogAction } from '../../components/AppDialog';
 import SyncBadge from '../../components/SyncBadge';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '../../constants/theme';
 import { FontPreset, useFontSettings } from '../../contexts/FontContext';
@@ -36,7 +36,7 @@ export default function SettingsScreen() {
     saveWebDAVConfig,
     clearWebDAVConfig,
   } = useNotes();
-  const { fontPreset, fontOptions, setFontPreset } = useFontSettings();
+  const { fontPreset, fontOptions, fontAvailability, setFontPreset, downloadFontPreset } = useFontSettings();
 
   const [repo, setRepo] = useState('');
   const [token, setToken] = useState('');
@@ -49,6 +49,19 @@ export default function SettingsScreen() {
 
   const [saving, setSaving] = useState(false);
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const [dialogConfig, setDialogConfig] = useState<{
+    title: string;
+    message: string;
+    actions: AppDialogAction[];
+  } | null>(null);
+
+  function showDialog(title: string, message: string, actions?: AppDialogAction[]) {
+    setDialogConfig({
+      title,
+      message,
+      actions: actions ?? [{ label: 'OK', variant: 'primary' }],
+    });
+  }
 
   const providerLabel = useMemo(
     () => (syncProvider === 'github' ? 'GitHub' : 'WebDAV'),
@@ -72,7 +85,7 @@ export default function SettingsScreen() {
 
   async function handleSaveGitHubConfig() {
     if (!repo.trim() || !token.trim()) {
-      Alert.alert('Missing field', 'Repo and token are required.');
+      showDialog('Missing field', 'Repo and token are required.');
       return;
     }
 
@@ -83,10 +96,10 @@ export default function SettingsScreen() {
         token: token.trim(),
         branch: branch.trim() || 'main',
       });
-      Alert.alert('Saved', 'GitHub configuration saved.');
+      showDialog('Saved', 'GitHub configuration saved.');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Save failed';
-      Alert.alert('Error', message);
+      showDialog('Error', message);
     } finally {
       setSaving(false);
     }
@@ -101,7 +114,7 @@ export default function SettingsScreen() {
 
   async function handleSaveWebDAVConfigPress() {
     if (!serverUrl.trim() || !webdavUsername.trim() || !webdavPassword.trim()) {
-      Alert.alert('Missing field', 'Server URL, Username, and Password are required.');
+      showDialog('Missing field', 'Server URL, Username, and Password are required.');
       return;
     }
 
@@ -113,10 +126,10 @@ export default function SettingsScreen() {
         password: webdavPassword,
         fileName: webdavFileName.trim() || 'a-note-sync.json',
       });
-      Alert.alert('Saved', 'WebDAV configuration saved.');
+      showDialog('Saved', 'WebDAV configuration saved.');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Save failed';
-      Alert.alert('Error', message);
+      showDialog('Error', message);
     } finally {
       setSaving(false);
     }
@@ -131,7 +144,36 @@ export default function SettingsScreen() {
   }
 
   async function handleFontPresetChange(preset: FontPreset) {
-    await setFontPreset(preset);
+    if (preset === 'system') {
+      await setFontPreset('system');
+      return;
+    }
+
+    const status = fontAvailability[preset];
+    if (status.installed) {
+      await setFontPreset(preset);
+      return;
+    }
+
+    const option = fontOptions.find((item) => item.id === preset);
+    const label = option?.label ?? preset;
+
+    showDialog('下载字体', `要下载 ${label} 吗？`, [
+      { label: '取消', variant: 'ghost' },
+      {
+        label: '下载',
+        variant: 'primary',
+        onPress: async () => {
+          try {
+            await downloadFontPreset(preset);
+            await setFontPreset(preset);
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Download failed';
+            showDialog('Error', message);
+          }
+        },
+      },
+    ]);
   }
 
   async function handleSelectProvider(provider: SyncProvider) {
@@ -166,25 +208,32 @@ export default function SettingsScreen() {
         <View style={styles.fontRow}>
           {fontOptions.map((option) => {
             const active = fontPreset === option.id;
+            const status =
+              option.id === 'system' ? { installed: true, downloading: false } : fontAvailability[option.id];
+            const disabled = option.id !== 'system' && !status.installed;
+            const label = status.downloading ? `${option.label} 下载中...` : option.label;
+
             return (
               <TouchableOpacity
                 key={option.id}
                 style={[
                   styles.fontBtn,
+                  disabled && styles.fontBtnDisabled,
                   {
                     borderColor: active ? colors.primary : colors.border,
                     backgroundColor: active ? colors.primaryLight : 'transparent',
                   },
                 ]}
                 onPress={() => handleFontPresetChange(option.id)}
+                disabled={status.downloading}
               >
                 <Text
                   style={[
                     Typography.bodySmall,
-                    { color: active ? colors.primary : colors.textSecondary },
+                    { color: active ? colors.primary : disabled ? colors.textTertiary : colors.textSecondary },
                   ]}
                 >
-                  {option.label}
+                  {label}
                 </Text>
               </TouchableOpacity>
             );
@@ -339,9 +388,7 @@ export default function SettingsScreen() {
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
             </View>
-            <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>
-              Step-by-step instructions for creating token and filling repo info.
-            </Text>
+            <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Step-by-step instructions for creating token and filling repo info.</Text>
           </TouchableOpacity>
         </>
       ) : (
@@ -473,9 +520,7 @@ export default function SettingsScreen() {
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
             </View>
-            <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>
-              Jianguoyun example and required fields.
-            </Text>
+            <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Jianguoyun example and required fields.</Text>
           </TouchableOpacity>
         </>
       )}
@@ -519,6 +564,14 @@ export default function SettingsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <AppDialog
+        visible={dialogConfig !== null}
+        title={dialogConfig?.title ?? ''}
+        message={dialogConfig?.message ?? ''}
+        actions={dialogConfig?.actions ?? []}
+        onClose={() => setDialogConfig(null)}
+      />
     </ScrollView>
   );
 }
@@ -576,6 +629,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.sm,
   },
+  fontBtnDisabled: {
+    opacity: 0.7,
+  },
   input: {
     borderWidth: 1,
     borderRadius: BorderRadius.sm,
@@ -614,4 +670,3 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
 });
-

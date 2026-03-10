@@ -4,7 +4,6 @@ import { format } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   Keyboard,
   Modal,
@@ -18,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import AppDialog, { type AppDialogAction } from '../components/AppDialog';
 import { BorderRadius, Colors, Spacing, Typography } from '../constants/theme';
 import { useFontSettings } from '../contexts/FontContext';
 import { useNotes } from '../contexts/NotesContext';
@@ -621,6 +621,7 @@ export default function EditorScreen() {
   const [showEditorShell, setShowEditorShell] = useState(!shouldAutoFocusParam);
   const [charCount, setCharCount] = useState(getCharCount(noteContent));
   const [bridgeValue, setBridgeValue] = useState('');
+  const [dialogConfig, setDialogConfig] = useState<{ title: string; message: string; actions?: AppDialogAction[] } | null>(null);
   const [formats, setFormats] = useState<FormatState>({
     heading: false,
     bold: false,
@@ -911,7 +912,10 @@ export default function EditorScreen() {
   async function handleInsertImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission required', 'Please allow photo access first.');
+      setDialogConfig({
+        title: 'Permission required',
+        message: 'Please allow photo access first.',
+      });
       return;
     }
 
@@ -1008,7 +1012,10 @@ export default function EditorScreen() {
       if (data.type === 'plainText' && typeof data.payload === 'string') {
         if (Platform.OS === 'web' && navigator?.clipboard) {
           navigator.clipboard.writeText(data.payload || '');
-          Alert.alert('Copied', 'Note copied to clipboard.');
+          setDialogConfig({
+            title: 'Copied',
+            message: 'Note copied to clipboard.',
+          });
           return;
         }
 
@@ -1061,6 +1068,7 @@ export default function EditorScreen() {
 
   const toolbarBottom = keyboardHeight > 0 ? keyboardHeight : 0;
   const showInputActions = keyboardVisible;
+  const closeDialog = () => setDialogConfig(null);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1249,6 +1257,14 @@ export default function EditorScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <AppDialog
+        visible={dialogConfig !== null}
+        title={dialogConfig?.title ?? ''}
+        message={dialogConfig?.message ?? ''}
+        actions={dialogConfig?.actions ?? [{ label: 'OK', variant: 'primary' }]}
+        onClose={closeDialog}
+      />
     </View>
   );
 }

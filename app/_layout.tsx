@@ -24,12 +24,6 @@ export default function RootLayout() {
     ...Ionicons.font,
     ...MaterialCommunityIcons.font,
     ...MaterialIcons.font,
-    'SarasaMonoSC-Regular': require('../assets/fonts/SarasaMonoSC-Regular.ttf'),
-    'SarasaMonoSC-Bold': require('../assets/fonts/SarasaMonoSC-Bold.ttf'),
-    'SourceHanSerifCN-Regular': require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
-    'SourceHanSerifCN-Bold': require('../assets/fonts/SourceHanSerifCN-Bold.otf'),
-    'GlowSansSC-Normal-Book': require('../assets/fonts/GlowSansSC-Normal-Book.otf'),
-    'GlowSansSC-Normal-ExtraBold': require('../assets/fonts/GlowSansSC-Normal-ExtraBold.otf'),
   });
 
   useEffect(() => {

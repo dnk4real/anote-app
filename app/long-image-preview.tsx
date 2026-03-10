@@ -2,9 +2,10 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as MediaLibrary from 'expo-media-library';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import { WebView } from 'react-native-webview';
+import AppDialog from '../components/AppDialog';
 import { BorderRadius, Colors, Spacing, Typography } from '../constants/theme';
 import { useFontSettings } from '../contexts/FontContext';
 import { useNotes } from '../contexts/NotesContext';
@@ -52,6 +53,7 @@ export default function LongImagePreviewScreen() {
   const [theme, setTheme] = useState<LongImageTheme>(defaultTheme);
   const [saving, setSaving] = useState(false);
   const [contentHeight, setContentHeight] = useState(900);
+  const [dialogConfig, setDialogConfig] = useState<{ title: string; message: string } | null>(null);
   const previewRef = useRef<View>(null);
 
   const image = useMemo(
@@ -89,13 +91,19 @@ export default function LongImagePreviewScreen() {
 
     try {
       if (Platform.OS === 'web') {
-        Alert.alert('Not supported', 'Please save long images from iOS or Android.');
+        setDialogConfig({
+          title: 'Not supported',
+          message: 'Please save long images from iOS or Android.',
+        });
         return;
       }
 
       const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
       if (!permission.granted) {
-        Alert.alert('Permission required', 'Please allow photo access first.');
+        setDialogConfig({
+          title: 'Permission required',
+          message: 'Please allow photo access first.',
+        });
         return;
       }
 
@@ -112,10 +120,16 @@ export default function LongImagePreviewScreen() {
       });
       await MediaLibrary.createAssetAsync(pngPath);
 
-      Alert.alert('Saved', 'Long image saved to your photo library.');
+      setDialogConfig({
+        title: 'Saved',
+        message: 'Long image saved to your photo library.',
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Save failed.';
-      Alert.alert('Save failed', message);
+      setDialogConfig({
+        title: 'Save failed',
+        message,
+      });
     } finally {
       setSaving(false);
     }
@@ -203,6 +217,14 @@ export default function LongImagePreviewScreen() {
           />
         </View>
       </ScrollView>
+
+      <AppDialog
+        visible={dialogConfig !== null}
+        title={dialogConfig?.title ?? ''}
+        message={dialogConfig?.message ?? ''}
+        actions={[{ label: 'OK', variant: 'primary' }]}
+        onClose={() => setDialogConfig(null)}
+      />
     </View>
   );
 }
