@@ -161,6 +161,11 @@ function makeEditorDocument(
     width: 100%;
     max-width: 100%;
     margin: 10px 0 !important;
+    transition: transform 120ms ease, opacity 120ms ease;
+  }
+  #editor .note-image-block.is-moving {
+    opacity: 0.06;
+    z-index: 9;
   }
   #editor img {
     display: block !important;
@@ -178,7 +183,7 @@ function makeEditorDocument(
   }
   #editor .note-image-handle {
     position: absolute;
-    right: 10px;
+    right: -14px;
     top: 74%;
     width: 22px;
     height: 22px;
@@ -218,6 +223,54 @@ function makeEditorDocument(
   #editor .note-image-block.is-adjusting .note-image-bubble {
     opacity: 1;
   }
+  #editor .note-image-drop-line {
+    position: absolute;
+    left: 0;
+    width: 168px;
+    height: 2px;
+    border-radius: 999px;
+    background: rgba(173, 138, 108, 0.75);
+    pointer-events: none;
+    display: none;
+    z-index: 8;
+  }
+  #editor .note-image-drop-line::before {
+    content: '';
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    transform: translateY(-50%);
+    background: rgba(201, 168, 141, 0.95);
+    box-shadow: 0 1px 4px rgba(28, 22, 18, 0.16);
+  }
+  #editor .note-image-drag-proxy {
+    position: absolute;
+    right: 24px;
+    width: 156px;
+    height: 38px;
+    border-radius: 19px;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.98);
+    box-shadow: 0 3px 12px rgba(28, 22, 18, 0.16);
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+  }
+  #editor .note-image-drag-proxy::after {
+    content: '';
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    top: 50%;
+    height: 2px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: rgba(210, 198, 186, 0.9);
+  }
   ul, ol { padding-left: 24px; }
   li { margin: 0 0 0.24em; }
   li:last-child { margin-bottom: 0; }
@@ -253,6 +306,8 @@ function makeEditorDocument(
   const IMAGE_BLOCK_SELECTOR = '.note-image-block';
   const IMAGE_HANDLE_SELECTOR = '.note-image-handle';
   const IMAGE_BUBBLE_SELECTOR = '.note-image-bubble';
+  const DROP_LINE_SELECTOR = '.note-image-drop-line';
+  const DRAG_PROXY_SELECTOR = '.note-image-drag-proxy';
   const MIN_IMAGE_WIDTH_RATIO = 0.38;
   const LONG_PRESS_MS = 260;
   let imageGesture = null;
@@ -274,11 +329,12 @@ function makeEditorDocument(
   };
 
   const cleanupEditorUi = (root) => {
-    root.querySelectorAll('.note-image-handle, .note-image-bubble').forEach((node) => {
+    root.querySelectorAll('.note-image-handle, .note-image-bubble, .note-image-drop-line, .note-image-drag-proxy').forEach((node) => {
       if (node.parentNode) node.parentNode.removeChild(node);
     });
     root.querySelectorAll(IMAGE_BLOCK_SELECTOR).forEach((block) => {
       block.classList.remove('is-adjusting');
+      block.classList.remove('is-moving');
     });
   };
 
@@ -327,26 +383,92 @@ function makeEditorDocument(
     block.classList.remove('is-adjusting');
   };
 
-  const moveImageBlockByPoint = (block, clientY) => {
-    const blocks = getTopLevelBlocks().filter((item) => item !== block);
-    let inserted = false;
+  const ensureDropLine = () => {
+    let dropLine = editor.querySelector(DROP_LINE_SELECTOR);
+    if (!dropLine) {
+      dropLine = document.createElement('span');
+      dropLine.className = 'note-image-drop-line';
+      dropLine.setAttribute('contenteditable', 'false');
+      dropLine.setAttribute('data-editor-ui', '1');
+      editor.appendChild(dropLine);
+    }
+    return dropLine;
+  };
 
-    for (const item of blocks) {
+  const ensureDragProxy = () => {
+    let proxy = editor.querySelector(DRAG_PROXY_SELECTOR);
+    if (!proxy) {
+      proxy = document.createElement('span');
+      proxy.className = 'note-image-drag-proxy';
+      proxy.setAttribute('contenteditable', 'false');
+      proxy.setAttribute('data-editor-ui', '1');
+      editor.appendChild(proxy);
+    }
+    return proxy;
+  };
+
+  const hideDragProxy = () => {
+    const proxy = editor.querySelector(DRAG_PROXY_SELECTOR);
+    if (proxy) {
+      proxy.style.display = 'none';
+    }
+  };
+
+  const showDragProxyAt = (clientY) => {
+    const proxy = ensureDragProxy();
+    const rect = editor.getBoundingClientRect();
+    const maxTop = Math.max(editor.scrollHeight - 20, 20);
+    const top = clamp(clientY - rect.top, 20, maxTop);
+    proxy.style.top = top + 'px';
+    proxy.style.display = 'block';
+  };
+
+  const hideDropLine = () => {
+    const dropLine = editor.querySelector(DROP_LINE_SELECTOR);
+    if (dropLine) {
+      dropLine.style.display = 'none';
+    }
+  };
+
+  const showDropLine = (clientY) => {
+    const dropLine = ensureDropLine();
+    const rect = editor.getBoundingClientRect();
+    const maxTop = Math.max(editor.scrollHeight - 2, 0);
+    const top = clamp(clientY - rect.top, 0, maxTop);
+    dropLine.style.top = top + 'px';
+    dropLine.style.display = 'block';
+  };
+
+  const resolveDropTargetByPoint = (block, clientY) => {
+    const blocks = getTopLevelBlocks().filter((item) => item !== block);
+    if (blocks.length === 0) {
+      return {
+        beforeNode: null,
+        line: 1,
+        y: block.getBoundingClientRect().top,
+      };
+    }
+
+    for (let index = 0; index < blocks.length; index += 1) {
+      const item = blocks[index];
       const rect = item.getBoundingClientRect();
       const middle = rect.top + rect.height / 2;
       if (clientY < middle) {
-        editor.insertBefore(block, item);
-        inserted = true;
-        break;
+        return {
+          beforeNode: item,
+          line: index + 1,
+          y: rect.top,
+        };
       }
     }
 
-    if (!inserted) {
-      editor.appendChild(block);
-    }
-
-    const ordered = getTopLevelBlocks();
-    return Math.max(1, ordered.indexOf(block) + 1);
+    const last = blocks[blocks.length - 1];
+    const lastRect = last.getBoundingClientRect();
+    return {
+      beforeNode: null,
+      line: blocks.length + 1,
+      y: lastRect.bottom,
+    };
   };
 
   const finishImageGesture = () => {
@@ -354,7 +476,17 @@ function makeEditorDocument(
     const state = imageGesture;
     imageGesture = null;
     clearTimeout(state.longPressTimer);
+    if (state.mode === 'move') {
+      if (state.beforeNode && state.beforeNode.parentNode === editor) {
+        editor.insertBefore(state.block, state.beforeNode);
+      } else {
+        editor.appendChild(state.block);
+      }
+    }
+    state.block.classList.remove('is-moving');
     hideImageBubble(state.block);
+    hideDropLine();
+    hideDragProxy();
 
     if (state.changed) {
       emit('contentSnapshot', snapshotHtml());
@@ -394,9 +526,12 @@ function makeEditorDocument(
     }
 
     if (imageGesture.mode === 'move') {
-      const line = moveImageBlockByPoint(imageGesture.block, point.y);
+      const target = resolveDropTargetByPoint(imageGesture.block, point.y);
+      imageGesture.beforeNode = target.beforeNode;
       imageGesture.changed = true;
-      showImageBubble(imageGesture.block, 'Line ' + line);
+      showDropLine(target.y);
+      showDragProxyAt(point.y);
+      showImageBubble(imageGesture.block, 'Line ' + target.line);
     }
   };
 
@@ -431,6 +566,7 @@ function makeEditorDocument(
       startRatio: readImageWidthRatio(block),
       mode: 'pending',
       changed: false,
+      beforeNode: null,
       longPressTimer: null,
     };
 
@@ -440,7 +576,12 @@ function makeEditorDocument(
     imageGesture.longPressTimer = setTimeout(() => {
       if (!imageGesture || imageGesture.block !== block) return;
       imageGesture.mode = 'move';
-      showImageBubble(block, 'Move image');
+      imageGesture.block.classList.add('is-moving');
+      const target = resolveDropTargetByPoint(block, imageGesture.startY);
+      imageGesture.beforeNode = target.beforeNode;
+      showDropLine(target.y);
+      showDragProxyAt(imageGesture.startY);
+      showImageBubble(block, 'Line ' + target.line);
     }, LONG_PRESS_MS);
   };
 
