@@ -164,8 +164,7 @@ function makeEditorDocument(
     transition: transform 120ms ease, opacity 120ms ease;
   }
   #editor .note-image-block.is-moving {
-    opacity: 0.06;
-    z-index: 9;
+    display: none !important;
   }
   #editor img {
     display: block !important;
@@ -183,11 +182,11 @@ function makeEditorDocument(
   }
   #editor .note-image-handle {
     position: absolute;
-    right: -14px;
+    right: -18px;
     top: 74%;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
     transform: translateY(-50%);
     background: rgba(255, 255, 255, 0.96);
     border: 1px solid rgba(255, 255, 255, 0.98);
@@ -195,6 +194,24 @@ function makeEditorDocument(
     pointer-events: auto;
     touch-action: none;
     z-index: 5;
+  }
+  #editor .note-image-handle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 8px;
+    transform: translate(-50%, -50%);
+    background-image:
+      linear-gradient(rgba(191, 182, 172, 0.62), rgba(191, 182, 172, 0.62)),
+      linear-gradient(rgba(191, 182, 172, 0.62), rgba(191, 182, 172, 0.62)),
+      linear-gradient(rgba(191, 182, 172, 0.62), rgba(191, 182, 172, 0.62));
+    background-size: 10px 1.5px, 10px 1.5px, 10px 1.5px;
+    background-position: 0 0, 0 3px, 0 6px;
+    background-repeat: no-repeat;
+    opacity: 0.72;
+    pointer-events: none;
   }
   #editor .note-image-block.is-adjusting .note-image-handle {
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35), 0 4px 12px rgba(28, 22, 18, 0.20);
