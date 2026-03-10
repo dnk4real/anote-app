@@ -141,14 +141,29 @@ export function buildLongImage(options: LongImageOptions): LongImageBuildResult 
       border-left: 2px solid ${palette.quoteBorder};
       color: ${palette.secondary};
     }
-    #content img {
-      display: block;
-      width: auto;
+    #content .note-image-block {
+      position: relative;
+      width: 100%;
       max-width: 100%;
-      height: auto;
-      border-radius: 0;
-      margin: 10px 0;
-      background: ${palette.imageBg};
+      margin: 10px 0 !important;
+    }
+    #content .note-image-block > img {
+      margin: 0 !important;
+    }
+    #content .note-image-handle,
+    #content .note-image-bubble {
+      display: none !important;
+    }
+    #content img {
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      height: auto !important;
+      border-radius: 7px !important;
+      margin: 10px 0 !important;
+      border: 4px solid rgba(255, 255, 255, 0.92) !important;
+      box-shadow: 0 2px 10px rgba(28, 22, 18, 0.10), 0 1px 2px rgba(28, 22, 18, 0.06) !important;
+      background: ${palette.imageBg} !important;
     }
     #content b,
     #content strong {

@@ -156,6 +156,68 @@ function makeEditorDocument(
     padding-left: 12px;
     color: #6b7280;
   }
+  #editor .note-image-block {
+    position: relative !important;
+    width: 100%;
+    max-width: 100%;
+    margin: 10px 0 !important;
+  }
+  #editor img {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    margin: 10px 0 !important;
+    border-radius: 7px !important;
+    border: 4px solid rgba(255, 255, 255, 0.92) !important;
+    box-shadow: 0 2px 10px rgba(28, 22, 18, 0.10), 0 1px 2px rgba(28, 22, 18, 0.06) !important;
+    background: rgba(255, 255, 255, 0.16) !important;
+  }
+  #editor .note-image-block > img {
+    margin: 0 !important;
+  }
+  #editor .note-image-handle {
+    position: absolute;
+    right: 10px;
+    top: 74%;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.98);
+    box-shadow: 0 2px 8px rgba(28, 22, 18, 0.14);
+    pointer-events: auto;
+    touch-action: none;
+    z-index: 5;
+  }
+  #editor .note-image-block.is-adjusting .note-image-handle {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35), 0 4px 12px rgba(28, 22, 18, 0.20);
+  }
+  #editor .note-image-bubble {
+    position: absolute;
+    right: 40px;
+    top: 74%;
+    transform: translateY(-50%);
+    min-width: 52px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.96);
+    color: #6a6258;
+    font-size: 12px;
+    line-height: 26px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(28, 22, 18, 0.14);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms ease;
+    z-index: 6;
+    white-space: nowrap;
+  }
+  #editor .note-image-block.is-adjusting .note-image-bubble {
+    opacity: 1;
+  }
   ul, ol { padding-left: 24px; }
   li { margin: 0 0 0.24em; }
   li:last-child { margin-bottom: 0; }
@@ -188,6 +250,244 @@ function makeEditorDocument(
   let lastBridgeLineBreakAt = 0;
   const BRIDGE_CARET_SELECTOR = 'span[data-bridge-caret="1"]';
   const BLOCK_TAGS = new Set(['P', 'DIV', 'H2', 'UL', 'OL', 'BLOCKQUOTE', 'LI']);
+  const IMAGE_BLOCK_SELECTOR = '.note-image-block';
+  const IMAGE_HANDLE_SELECTOR = '.note-image-handle';
+  const IMAGE_BUBBLE_SELECTOR = '.note-image-bubble';
+  const MIN_IMAGE_WIDTH_RATIO = 0.38;
+  const LONG_PRESS_MS = 260;
+  let imageGesture = null;
+  let imageGestureEventsBound = false;
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  const getPoint = (event) => {
+    if (event.touches && event.touches[0]) {
+      return { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }
+    if (event.changedTouches && event.changedTouches[0]) {
+      return { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY };
+    }
+    if (typeof event.clientX === 'number' && typeof event.clientY === 'number') {
+      return { x: event.clientX, y: event.clientY };
+    }
+    return null;
+  };
+
+  const cleanupEditorUi = (root) => {
+    root.querySelectorAll('.note-image-handle, .note-image-bubble').forEach((node) => {
+      if (node.parentNode) node.parentNode.removeChild(node);
+    });
+    root.querySelectorAll(IMAGE_BLOCK_SELECTOR).forEach((block) => {
+      block.classList.remove('is-adjusting');
+    });
+  };
+
+  const getTopLevelBlocks = () =>
+    Array.from(editor.childNodes).filter((node) =>
+      node && node.nodeType === Node.ELEMENT_NODE && !isBridgeCaretNode(node)
+    );
+
+  const readImageWidthRatio = (block) => {
+    const raw = Number(block.getAttribute('data-image-width'));
+    if (Number.isFinite(raw) && raw > 0) {
+      return clamp(raw / 100, MIN_IMAGE_WIDTH_RATIO, 1);
+    }
+    const blockWidth = block.getBoundingClientRect().width;
+    const editorWidth = Math.max(editor.getBoundingClientRect().width, 1);
+    return clamp(blockWidth / editorWidth, MIN_IMAGE_WIDTH_RATIO, 1);
+  };
+
+  const applyImageWidthRatio = (block, ratio) => {
+    const nextRatio = clamp(ratio, MIN_IMAGE_WIDTH_RATIO, 1);
+    const pct = Math.round(nextRatio * 1000) / 10;
+    block.style.width = pct + '%';
+    block.setAttribute('data-image-width', String(pct));
+    return nextRatio;
+  };
+
+  const ensureImageBubble = (block) => {
+    let bubble = block.querySelector(IMAGE_BUBBLE_SELECTOR);
+    if (!bubble) {
+      bubble = document.createElement('span');
+      bubble.className = 'note-image-bubble';
+      bubble.setAttribute('contenteditable', 'false');
+      bubble.setAttribute('data-editor-ui', '1');
+      block.appendChild(bubble);
+    }
+    return bubble;
+  };
+
+  const showImageBubble = (block, text) => {
+    const bubble = ensureImageBubble(block);
+    bubble.textContent = text;
+    block.classList.add('is-adjusting');
+  };
+
+  const hideImageBubble = (block) => {
+    block.classList.remove('is-adjusting');
+  };
+
+  const moveImageBlockByPoint = (block, clientY) => {
+    const blocks = getTopLevelBlocks().filter((item) => item !== block);
+    let inserted = false;
+
+    for (const item of blocks) {
+      const rect = item.getBoundingClientRect();
+      const middle = rect.top + rect.height / 2;
+      if (clientY < middle) {
+        editor.insertBefore(block, item);
+        inserted = true;
+        break;
+      }
+    }
+
+    if (!inserted) {
+      editor.appendChild(block);
+    }
+
+    const ordered = getTopLevelBlocks();
+    return Math.max(1, ordered.indexOf(block) + 1);
+  };
+
+  const finishImageGesture = () => {
+    if (!imageGesture) return;
+    const state = imageGesture;
+    imageGesture = null;
+    clearTimeout(state.longPressTimer);
+    hideImageBubble(state.block);
+
+    if (state.changed) {
+      emit('contentSnapshot', snapshotHtml());
+      readState();
+    }
+  };
+
+  const onImageGestureMove = (event) => {
+    if (!imageGesture) return;
+    const point = getPoint(event);
+    if (!point) return;
+
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+
+    const dx = point.x - imageGesture.startX;
+    const dy = point.y - imageGesture.startY;
+
+    if (imageGesture.mode === 'pending') {
+      if (Math.abs(dx) > 12 && Math.abs(dx) >= Math.abs(dy)) {
+        clearTimeout(imageGesture.longPressTimer);
+        imageGesture.mode = 'resize';
+      } else {
+        return;
+      }
+    }
+
+    if (imageGesture.mode === 'resize') {
+      const editorWidth = Math.max(editor.getBoundingClientRect().width, 1);
+      const ratio = applyImageWidthRatio(
+        imageGesture.block,
+        imageGesture.startRatio + dx / editorWidth
+      );
+      imageGesture.changed = true;
+      showImageBubble(imageGesture.block, Math.round(ratio * 100) + '%');
+      return;
+    }
+
+    if (imageGesture.mode === 'move') {
+      const line = moveImageBlockByPoint(imageGesture.block, point.y);
+      imageGesture.changed = true;
+      showImageBubble(imageGesture.block, 'Line ' + line);
+    }
+  };
+
+  const onImageGestureEnd = (event) => {
+    if (!imageGesture) return;
+    if (event && event.cancelable) event.preventDefault();
+    if (event && event.stopPropagation) event.stopPropagation();
+    finishImageGesture();
+  };
+
+  const ensureImageGestureEvents = () => {
+    if (imageGestureEventsBound) return;
+    imageGestureEventsBound = true;
+    document.addEventListener('touchmove', onImageGestureMove, { passive: false });
+    document.addEventListener('mousemove', onImageGestureMove);
+    document.addEventListener('touchend', onImageGestureEnd, { passive: false });
+    document.addEventListener('mouseup', onImageGestureEnd);
+    document.addEventListener('touchcancel', onImageGestureEnd, { passive: false });
+  };
+
+  const onImageHandleStart = (block, event) => {
+    const point = getPoint(event);
+    if (!point) return;
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+
+    clearTimeout(imageGesture && imageGesture.longPressTimer);
+    imageGesture = {
+      block,
+      startX: point.x,
+      startY: point.y,
+      startRatio: readImageWidthRatio(block),
+      mode: 'pending',
+      changed: false,
+      longPressTimer: null,
+    };
+
+    showImageBubble(block, 'Hold...');
+    suppressBridgeCaret();
+
+    imageGesture.longPressTimer = setTimeout(() => {
+      if (!imageGesture || imageGesture.block !== block) return;
+      imageGesture.mode = 'move';
+      showImageBubble(block, 'Move image');
+    }, LONG_PRESS_MS);
+  };
+
+  const bindImageHandle = (block, handle) => {
+    if (handle.getAttribute('data-bound') === '1') return;
+    handle.setAttribute('data-bound', '1');
+    handle.addEventListener('touchstart', (event) => onImageHandleStart(block, event), { passive: false });
+    handle.addEventListener('mousedown', (event) => onImageHandleStart(block, event));
+  };
+
+  const ensureImageBlock = (img) => {
+    let block = img.closest(IMAGE_BLOCK_SELECTOR);
+    if (!block) {
+      block = document.createElement('div');
+      block.className = 'note-image-block';
+      const parent = img.parentNode;
+      if (!parent) return null;
+      parent.insertBefore(block, img);
+      block.appendChild(img);
+    }
+
+    if (!block.getAttribute('data-image-width')) {
+      block.setAttribute('data-image-width', '100');
+    }
+
+    if (!block.style.width) {
+      block.style.width = block.getAttribute('data-image-width') + '%';
+    }
+
+    let handle = block.querySelector(IMAGE_HANDLE_SELECTOR);
+    if (!handle) {
+      handle = document.createElement('span');
+      handle.className = 'note-image-handle';
+      handle.setAttribute('contenteditable', 'false');
+      handle.setAttribute('data-editor-ui', '1');
+      block.appendChild(handle);
+    }
+
+    bindImageHandle(block, handle);
+    return block;
+  };
+
+  const enhanceImageBlocks = () => {
+    Array.from(editor.querySelectorAll('img')).forEach((img) => {
+      ensureImageBlock(img);
+    });
+  };
 
   const emit = (type, payload) => {
     window.ReactNativeWebView.postMessage(JSON.stringify({ type, payload }));
@@ -196,6 +496,7 @@ function makeEditorDocument(
   const snapshotHtml = () => {
     normalizeTopLevelBlocks();
     const clone = editor.cloneNode(true);
+    cleanupEditorUi(clone);
     const caret = clone.querySelector(BRIDGE_CARET_SELECTOR);
     if (caret && caret.parentNode) {
       caret.parentNode.removeChild(caret);
@@ -390,6 +691,7 @@ function makeEditorDocument(
 
   editor.addEventListener('input', () => {
     autoFocusCancelled = true;
+    enhanceImageBlocks();
     clearTimeout(snapshotTimer);
     snapshotTimer = setTimeout(() => {
       emit('contentSnapshot', snapshotHtml());
@@ -442,7 +744,14 @@ function makeEditorDocument(
     if (!bridgeCaretSuppressed) {
       placeSelectionBeforeBridgeCaret();
     }
-    document.execCommand('insertHTML', false, '<div><img src="' + safeUri + '" style="max-width:100%;height:auto;border-radius:8px;display:block;margin:8px 0;" /></div>');
+    document.execCommand(
+      'insertHTML',
+      false,
+      '<div class="note-image-block" data-image-width="100" style="width:100%;"><img src="' +
+        safeUri +
+        '" /></div>'
+    );
+    enhanceImageBlocks();
     if (!bridgeCaretSuppressed) {
       placeSelectionBeforeBridgeCaret();
     }
@@ -550,6 +859,8 @@ function makeEditorDocument(
 
   setTimeout(() => {
     normalizeTopLevelBlocks();
+    ensureImageGestureEvents();
+    enhanceImageBlocks();
     readState();
     emit('contentSnapshot', snapshotHtml());
   }, 0);
@@ -972,6 +1283,10 @@ export default function EditorScreen() {
     try {
       const data = JSON.parse(raw) as WebMessage;
 
+      if (data.type === 'editorFocused' && data.payload) {
+        setShareOpen(false);
+      }
+
       if (data.type === 'formatState' && isFormatState(data.payload)) {
         if (isLeavingRef.current) return;
         const nextFormats = data.payload;
@@ -1094,7 +1409,7 @@ export default function EditorScreen() {
           ) : (
             <>
               <Pressable onPress={() => setShareOpen((value) => !value)}>
-                <FontAwesome6 name="share-nodes" size={20} color={colors.textSecondary} />
+                <FontAwesome6 name="share" size={20} color={colors.textSecondary} />
               </Pressable>
               <Pressable onPress={handleDelete}>
                 <FontAwesome6 name="trash-can" size={20} color={colors.textSecondary} />
