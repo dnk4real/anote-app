@@ -413,7 +413,7 @@ export default function SettingsScreen() {
             <TextInput
               value={serverUrl}
               onChangeText={setServerUrl}
-              placeholder="https://dav.jianguoyun.com/dav/"
+              placeholder="https://dav.jianguoyun.com/dav/anote_sync/"
               placeholderTextColor={colors.textTertiary}
               style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
               autoCapitalize="none"

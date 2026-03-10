@@ -11,15 +11,19 @@ const STEPS = [
     body: 'Open Jianguoyun settings and enable WebDAV service.',
   },
   {
-    title: '2. Create App Password',
+    title: '2. Create Sync Folder (Important)',
+    body: 'Jianguoyun does not allow writing directly in WebDAV root. Create a folder first, for example: anote_sync.',
+  },
+  {
+    title: '3. Create App Password',
     body: 'In Jianguoyun security settings, create an app-specific password for WebDAV.',
   },
   {
-    title: '3. Fill in A-Note settings',
-    body: 'Provider = WebDAV, Server URL = https://dav.jianguoyun.com/dav/, Username = Jianguoyun account, Password = app password, Remote File can keep a-note-sync.json.',
+    title: '4. Fill in A-Note settings',
+    body: 'Provider = WebDAV, Server URL = https://dav.jianguoyun.com/dav/anote_sync/, Username = Jianguoyun account, Password = app password, Remote File can keep a-note-sync.json.',
   },
   {
-    title: '4. Save and sync',
+    title: '5. Save and sync',
     body: 'Tap Save Config, then Sync Now (or pull down on main screen) to run sync.',
   },
 ];
@@ -71,7 +75,7 @@ export default function WebDAVSyncGuideScreen() {
 
         <View style={[styles.tipCard, { backgroundColor: colors.primaryLight, borderColor: colors.borderLight }]}>
           <Text style={[Typography.bodySmall, { color: colors.textPrimary }]}>
-            Tip: Jianguoyun requires app password, not account login password.
+            Tip: Use an app password (not account password), and use a subfolder URL like /dav/anote_sync/.
           </Text>
         </View>
       </ScrollView>
@@ -112,4 +116,3 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
 });
-

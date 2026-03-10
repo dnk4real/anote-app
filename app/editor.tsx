@@ -1,4 +1,4 @@
-import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { FontAwesome6, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { format } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
@@ -1085,19 +1085,19 @@ export default function EditorScreen() {
           {showInputActions ? (
             <>
               <Pressable onPress={handleInsertImage}>
-                <Feather name="image" size={21} color={colors.textSecondary} />
+                <FontAwesome6 name="image" size={20} color={colors.textSecondary} />
               </Pressable>
               <Pressable onPress={handleConfirmSave}>
-                <Feather name="check" size={21} color={colors.textSecondary} />
+                <FontAwesome6 name="check" size={20} color={colors.textSecondary} />
               </Pressable>
             </>
           ) : (
             <>
               <Pressable onPress={() => setShareOpen((value) => !value)}>
-                <Feather name="share-2" size={21} color={colors.textSecondary} />
+                <FontAwesome6 name="share-nodes" size={20} color={colors.textSecondary} />
               </Pressable>
               <Pressable onPress={handleDelete}>
-                <Feather name="trash-2" size={21} color={colors.textSecondary} />
+                <FontAwesome6 name="trash-can" size={20} color={colors.textSecondary} />
               </Pressable>
             </>
           )}
