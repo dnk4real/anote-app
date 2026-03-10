@@ -36,23 +36,23 @@ const FONT_OPTIONS: FontOption[] = [
 
 const FONT_ASSETS: Record<Exclude<FontPreset, 'system'>, FontAssetGroup> = {
   sarasa_gothic: {
-    regular: require('../assets/fonts/SarasaGothicSC-Regular.ttf'),
-    bold: require('../assets/fonts/SarasaGothicSC-Bold.ttf'),
+    regular: require('../assets/fonts/SarasaMonoSC-Regular.ttf'),
+    bold: require('../assets/fonts/SarasaMonoSC-Bold.ttf'),
   },
   source_han_serif: {
     regular: require('../assets/fonts/SourceHanSerifCN-Regular.otf'),
     bold: require('../assets/fonts/SourceHanSerifCN-Bold.otf'),
   },
   glow_sans: {
-    regular: require('../assets/fonts/GlowSansSC-Regular.otf'),
-    bold: require('../assets/fonts/GlowSansSC-Bold.otf'),
+    regular: require('../assets/fonts/GlowSansSC-Normal-Book.otf'),
+    bold: require('../assets/fonts/GlowSansSC-Normal-ExtraBold.otf'),
   },
 };
 
 const RN_FONT_FAMILY: Record<Exclude<FontPreset, 'system'>, { regular: string; bold: string }> = {
-  sarasa_gothic: { regular: 'SarasaGothicSC-Regular', bold: 'SarasaGothicSC-Bold' },
+  sarasa_gothic: { regular: 'SarasaMonoSC-Regular', bold: 'SarasaMonoSC-Bold' },
   source_han_serif: { regular: 'SourceHanSerifCN-Regular', bold: 'SourceHanSerifCN-Bold' },
-  glow_sans: { regular: 'GlowSansSC-Regular', bold: 'GlowSansSC-Bold' },
+  glow_sans: { regular: 'GlowSansSC-Normal-Book', bold: 'GlowSansSC-Normal-ExtraBold' },
 };
 
 const FontContext = createContext<FontContextValue | undefined>(undefined);
