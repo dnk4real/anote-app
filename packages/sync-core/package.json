@@ -1,0 +1,10 @@
+{
+  "name": "@anote/sync-core",
+  "private": true,
+  "version": "0.1.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@anote/shared-types": "0.1.0"
+  }
+}

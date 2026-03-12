@@ -44,3 +44,13 @@ app-example
 
 # local temporary extraction cache
 /.tmp-fonts/
+
+# binaries
+*.exe
+apps/desktop/artifacts-win/win-unpacked/resources/app.asar
+apps/desktop/artifacts-dir-fixed/win-unpacked/resources/app.asar
+apps/desktop/artifacts-dir-icons/win-unpacked/resources/app.asar
+apps/desktop/artifacts-dir-verify/win-unpacked/resources/app.asar
+apps/desktop/artifacts-dir-verify2/win-unpacked/resources/app.asar
+apps/desktop/artifacts-dir-verify3/win-unpacked/resources/app.asar
+/apps/desktop/artifacts-win/win-unpacked/resources

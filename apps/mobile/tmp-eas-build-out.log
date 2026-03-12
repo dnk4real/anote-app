@@ -1,0 +1,40 @@
+[
+  {
+    "id": "f6e94ab8-288a-4c69-8300-d8fbeb095e20",
+    "status": "NEW",
+    "platform": "ANDROID",
+    "artifacts": {},
+    "fingerprint": {
+      "id": "019cde39-53e5-729c-842c-2ccfac401adf",
+      "hash": "a66b7c86a13aa2a61d791b331ddb71f9081fa132"
+    },
+    "initiatingActor": {
+      "id": "af94c0ef-b4f0-45ba-83bd-c9979acf9666",
+      "displayName": "dnk4real"
+    },
+    "logFiles": [],
+    "project": {
+      "id": "b4492a9b-3c48-45aa-9762-b62009f6a93c",
+      "name": "A-NOTE-APP",
+      "slug": "A-NOTE-APP",
+      "ownerAccount": {
+        "id": "abbf314e-014d-4968-8f19-aa2a363fc3d7",
+        "name": "dnk4real"
+      }
+    },
+    "channel": "preview",
+    "distribution": "STORE",
+    "buildProfile": "preview",
+    "sdkVersion": "54.0.0",
+    "appVersion": "1.1.0",
+    "appBuildVersion": "1",
+    "runtimeVersion": "1.1.0",
+    "gitCommitHash": "987c47a019a5e7e01edad64b4290ebfb6c5f3232",
+    "gitCommitMessage": "整理pc与手机版文件夹以适配要求」} this incorrect. I",
+    "priority": "NORMAL",
+    "createdAt": "2026-03-11T19:04:31.255Z",
+    "updatedAt": "2026-03-11T19:04:31.255Z",
+    "expirationDate": "2026-04-10T19:04:31.362Z",
+    "isForIosSimulator": false
+  }
+]
