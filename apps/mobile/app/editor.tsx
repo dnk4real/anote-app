@@ -1,6 +1,7 @@
 import { FontAwesome6, Ionicons, MaterialCommunityIcons, MaterialIcons, Octicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { format } from 'date-fns';
+import * as Clipboard from 'expo-clipboard';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,7 +9,6 @@ import {
   Animated,
   Keyboard,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -107,6 +107,331 @@ function hasMeaningfulNoteContent(content: string): boolean {
 const INLINE_IMAGE_QUALITY = 0.7;
 const MAX_INLINE_IMAGE_BYTES = 1_250_000;
 const MAX_INLINE_IMAGE_SHORT_EDGE = 1080;
+
+const WEBVIEW_PASTE_ENHANCER_SCRIPT = `
+(function () {
+  try {
+    var editor = document.getElementById('editor');
+    if (!editor) return;
+    if (editor.getAttribute('data-anote-paste-enhancer') === '1') return;
+    editor.setAttribute('data-anote-paste-enhancer', '1');
+
+    var escapeHtml = function (value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    };
+
+    var plainTextToEditorHtml = function (rawText) {
+      var lines = String(rawText || '').replace(/\\r\\n?/g, '\\n').split('\\n');
+      return lines
+        .map(function (line) {
+          if (!line.trim()) return '<div><br></div>';
+          return '<div>' + escapeHtml(line) + '</div>';
+        })
+        .join('');
+    };
+
+    var isCenterAlignedElement = function (element) {
+      if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+      var align = String(element.getAttribute('align') || '').toLowerCase();
+      var style = String(element.getAttribute('style') || '').toLowerCase();
+      return align === 'center' || /text-align\\s*:\\s*center/.test(style);
+    };
+
+    var sanitizePastedHtml = function (rawHtml) {
+      if (!rawHtml || !String(rawHtml).trim()) return '';
+
+      var parsed = null;
+      try {
+        parsed = new DOMParser().parseFromString(String(rawHtml), 'text/html');
+      } catch (error) {
+        return '';
+      }
+      if (!parsed || !parsed.body) return '';
+
+      parsed.querySelectorAll('script,style,meta,link,iframe,object').forEach(function (node) {
+        node.remove();
+      });
+
+      var doc = parsed;
+      var topLevelBlocks = new Set([
+        'DIV',
+        'P',
+        'SECTION',
+        'ARTICLE',
+        'HEADER',
+        'FOOTER',
+        'MAIN',
+        'ASIDE',
+        'H1',
+        'H2',
+        'H3',
+        'H4',
+        'H5',
+        'H6',
+        'UL',
+        'OL',
+        'BLOCKQUOTE',
+        'PRE',
+        'LI',
+      ]);
+
+      var hasMeaningfulChildren = function (element) {
+        return Boolean(
+          (element.textContent || '').trim() ||
+            element.querySelector('br,strong,em,ul,ol,li,blockquote,h2')
+        );
+      };
+
+      var sanitizeInlineInto = function (sourceNode, target) {
+        if (!sourceNode) return;
+        if (sourceNode.nodeType === Node.TEXT_NODE) {
+          target.appendChild(doc.createTextNode(sourceNode.textContent || ''));
+          return;
+        }
+        if (sourceNode.nodeType !== Node.ELEMENT_NODE) return;
+
+        var tag = sourceNode.tagName.toUpperCase();
+        if (tag === 'BR') {
+          target.appendChild(doc.createElement('br'));
+          return;
+        }
+        if (tag === 'B' || tag === 'STRONG') {
+          var strong = doc.createElement('strong');
+          Array.from(sourceNode.childNodes).forEach(function (child) {
+            sanitizeInlineInto(child, strong);
+          });
+          target.appendChild(strong);
+          return;
+        }
+        if (tag === 'I' || tag === 'EM') {
+          var em = doc.createElement('em');
+          Array.from(sourceNode.childNodes).forEach(function (child) {
+            sanitizeInlineInto(child, em);
+          });
+          target.appendChild(em);
+          return;
+        }
+
+        Array.from(sourceNode.childNodes).forEach(function (child) {
+          sanitizeInlineInto(child, target);
+        });
+      };
+
+      var sanitizeList = function (sourceList) {
+        var tag = sourceList.tagName.toUpperCase() === 'OL' ? 'ol' : 'ul';
+        var list = doc.createElement(tag);
+        if (isCenterAlignedElement(sourceList)) {
+          list.style.textAlign = 'center';
+        }
+
+        var items = Array.from(sourceList.childNodes).filter(function (child) {
+          return child.nodeType === Node.ELEMENT_NODE && child.tagName.toUpperCase() === 'LI';
+        });
+
+        items.forEach(function (item) {
+          var li = doc.createElement('li');
+          Array.from(item.childNodes).forEach(function (child) {
+            sanitizeInlineInto(child, li);
+          });
+          if (hasMeaningfulChildren(li)) {
+            list.appendChild(li);
+          }
+        });
+
+        return hasMeaningfulChildren(list) ? list : null;
+      };
+
+      var sanitizeBlock = function (sourceNode) {
+        if (!sourceNode) return null;
+        if (sourceNode.nodeType === Node.TEXT_NODE) {
+          var text = String(sourceNode.textContent || '');
+          if (!text.trim()) return null;
+          var textDiv = doc.createElement('div');
+          textDiv.textContent = text;
+          return textDiv;
+        }
+        if (sourceNode.nodeType !== Node.ELEMENT_NODE) return null;
+
+        var tag = sourceNode.tagName.toUpperCase();
+        if (tag === 'UL' || tag === 'OL') {
+          return sanitizeList(sourceNode);
+        }
+        if (tag === 'BLOCKQUOTE') {
+          var blockquote = doc.createElement('blockquote');
+          Array.from(sourceNode.childNodes).forEach(function (child) {
+            sanitizeInlineInto(child, blockquote);
+          });
+          if (isCenterAlignedElement(sourceNode)) {
+            blockquote.style.textAlign = 'center';
+          }
+          return hasMeaningfulChildren(blockquote) ? blockquote : null;
+        }
+        if (/^H[1-6]$/.test(tag)) {
+          var heading = doc.createElement('h2');
+          Array.from(sourceNode.childNodes).forEach(function (child) {
+            sanitizeInlineInto(child, heading);
+          });
+          if (isCenterAlignedElement(sourceNode)) {
+            heading.style.textAlign = 'center';
+          }
+          return hasMeaningfulChildren(heading) ? heading : null;
+        }
+
+        var div = doc.createElement('div');
+        if (isCenterAlignedElement(sourceNode)) {
+          div.style.textAlign = 'center';
+        }
+        Array.from(sourceNode.childNodes).forEach(function (child) {
+          sanitizeInlineInto(child, div);
+        });
+        if (!hasMeaningfulChildren(div)) {
+          div.appendChild(doc.createElement('br'));
+        }
+        return div;
+      };
+
+      var root = doc.createElement('div');
+      var inlineBuffer = null;
+      var flushInlineBuffer = function () {
+        if (!inlineBuffer) return;
+        if (hasMeaningfulChildren(inlineBuffer)) {
+          root.appendChild(inlineBuffer);
+        }
+        inlineBuffer = null;
+      };
+
+      Array.from(doc.body.childNodes).forEach(function (node) {
+        var isBlock =
+          node.nodeType === Node.ELEMENT_NODE && topLevelBlocks.has(node.tagName.toUpperCase());
+        if (isBlock) {
+          flushInlineBuffer();
+          var block = sanitizeBlock(node);
+          if (block) root.appendChild(block);
+          return;
+        }
+
+        if (!inlineBuffer) {
+          inlineBuffer = doc.createElement('div');
+        }
+        sanitizeInlineInto(node, inlineBuffer);
+      });
+
+      flushInlineBuffer();
+      return root.innerHTML;
+    };
+
+    window.__anoteInsertPlainText = function (rawText) {
+      var normalized = String(rawText || '').replace(/\r\n?/g, '\n');
+      if (!normalized) return;
+      var lines = normalized.split('\n');
+      for (var i = 0; i < lines.length; i += 1) {
+        var line = lines[i];
+        if (line) {
+          try {
+            document.execCommand('insertText', false, line);
+          } catch (e) {
+            // ignore
+          }
+        }
+        if (i < lines.length - 1) {
+          var insertedBreak = false;
+          try {
+            insertedBreak = document.execCommand('insertParagraph', false);
+          } catch (e) {
+            insertedBreak = false;
+          }
+          if (!insertedBreak) {
+            try {
+              document.execCommand('insertHTML', false, '<br>');
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+      }
+      if (window.__snapshot) {
+        window.__snapshot();
+      }
+    };
+
+    window.__anotePasteExternal = function (rawHtml, rawText) {
+      var html = sanitizePastedHtml(rawHtml || '');
+      if (html && html.trim()) {
+        try {
+          document.execCommand('insertHTML', false, html);
+          if (window.__snapshot) {
+            window.__snapshot();
+          }
+          return;
+        } catch (e) {
+          // fallback below
+        }
+      }
+      if (window.__anoteInsertPlainText) {
+        window.__anoteInsertPlainText(rawText || '');
+      }
+    };
+
+    editor.addEventListener(
+      'paste',
+      function (event) {
+        try {
+          var clipboard = event.clipboardData;
+          if (!clipboard) return;
+
+          var rawHtml = clipboard.getData('text/html') || '';
+          var rawText = clipboard.getData('text/plain') || '';
+          if (!rawHtml && !rawText) return;
+
+          event.preventDefault();
+
+          var didInsert = false;
+          var normalizedHtml = sanitizePastedHtml(rawHtml);
+          if (normalizedHtml && normalizedHtml.trim()) {
+            try {
+              didInsert = document.execCommand('insertHTML', false, normalizedHtml);
+            } catch (error) {
+              didInsert = false;
+            }
+          }
+
+          if (!didInsert && rawText) {
+            var plainHtml = plainTextToEditorHtml(rawText);
+            try {
+              didInsert = document.execCommand('insertHTML', false, plainHtml);
+            } catch (error) {
+              didInsert = false;
+            }
+          }
+
+          if (!didInsert && rawText) {
+            try {
+              didInsert = document.execCommand('insertText', false, rawText);
+            } catch (error) {
+              didInsert = false;
+            }
+          }
+
+          if (window.__snapshot) {
+            window.__snapshot();
+          }
+        } catch (error) {
+          // keep editor stable even if paste enhancer fails
+        }
+      },
+      true
+    );
+  } catch (error) {
+    // keep editor stable even if enhancer init fails
+  }
+})();
+true;
+`;
 
 function toBase64Bytes(base64: string): number {
   const normalized = base64.replace(/\s+/g, '');
@@ -1661,8 +1986,72 @@ export default function EditorScreen() {
     setBridgeValue('');
   }, [injectBridgeLineBreak]);
 
+  const injectBridgePasteFromClipboard = useCallback((html: string, text: string) => {
+    const js = `
+      (function () {
+        var rawHtml = ${JSON.stringify(html || '')};
+        var rawText = ${JSON.stringify(text || '')};
+        if (window.__focusEditor) window.__focusEditor();
+        if (window.__anotePasteExternal) {
+          window.__anotePasteExternal(rawHtml, rawText);
+        } else if (window.__anoteInsertPlainText) {
+          window.__anoteInsertPlainText(rawText);
+        } else if (window.__insertText) {
+          window.__insertText(rawText);
+        }
+        if (window.__focusEditor) window.__focusEditor();
+      })();
+      true;
+    `;
+    webviewRef.current?.injectJavaScript(js);
+  }, []);
+
+  const handleBridgePasteCandidate = useCallback(
+    async (candidateText: string) => {
+      const normalize = (value: string) => String(value || '').replace(/\r\n?/g, '\n');
+      const candidate = normalize(candidateText);
+      let plain = '';
+      let html = '';
+
+      try {
+        plain = await Clipboard.getStringAsync({
+          preferredFormat: Clipboard.StringFormat.PLAIN_TEXT,
+        });
+      } catch {
+        plain = '';
+      }
+
+      try {
+        html = await Clipboard.getStringAsync({
+          preferredFormat: Clipboard.StringFormat.HTML,
+        });
+      } catch {
+        html = '';
+      }
+
+      const normalizedPlain = normalize(plain);
+      const normalizedCandidate = normalize(candidate);
+      const matchesClipboard =
+        normalizedPlain === normalizedCandidate ||
+        normalizedPlain.endsWith(normalizedCandidate) ||
+        normalizedCandidate.endsWith(normalizedPlain) ||
+        normalizedPlain.includes(normalizedCandidate);
+
+      const hasHtmlTags = /<\/?[a-z][^>]*>/i.test(html || '');
+
+      if (matchesClipboard && hasHtmlTags) {
+        injectBridgePasteFromClipboard(html, normalizedCandidate);
+        return;
+      }
+
+      injectBridgePasteFromClipboard('', normalizedCandidate);
+    },
+    [injectBridgePasteFromClipboard]
+  );
+
   const handleBridgeTextChange = useCallback((text: string) => {
     const previous = bridgeValueRef.current;
+    const rawText = String(text || '');
     const hasLineBreak = /[\r\n]/.test(text);
     let next = text.replace(/[\r\n]/g, '');
 
@@ -1701,11 +2090,24 @@ export default function EditorScreen() {
 
     const deletedCount = previous.length - sharedPrefixLength;
     const insertedText = next.slice(sharedPrefixLength);
+    const likelyPaste =
+      rawText.length > previous.length + 1 || (hasLineBreak && /[^\r\n]/.test(rawText));
+    const normalizedRaw = rawText.replace(/\r\n?/g, '\n');
+    const pastedChunk = normalizedRaw.startsWith(previous)
+      ? normalizedRaw.slice(previous.length)
+      : normalizedRaw;
 
     if (deletedCount > 0) {
       webviewRef.current?.injectJavaScript(
         `window.__deleteBackwardCount && window.__deleteBackwardCount(${deletedCount}); true;`
       );
+    }
+
+    if (likelyPaste && pastedChunk) {
+      bridgeValueRef.current = '';
+      setBridgeValue('');
+      void handleBridgePasteCandidate(pastedChunk);
+      return;
     }
 
     if (insertedText) {
@@ -1717,7 +2119,7 @@ export default function EditorScreen() {
 
     bridgeValueRef.current = next;
     setBridgeValue(next);
-  }, []);
+  }, [handleBridgePasteCandidate]);
 
   const handleBridgeKeyPress = useCallback((event: { nativeEvent: { key: string } }) => {
     if (event.nativeEvent.key === 'Enter') {
@@ -1742,6 +2144,7 @@ export default function EditorScreen() {
 
   const handleEditorLoadEnd = useCallback(() => {
     webviewLoadedRef.current = true;
+    webviewRef.current?.injectJavaScript(WEBVIEW_PASTE_ENHANCER_SCRIPT);
     triggerAutoFocus();
     if (!initialSnapshotSeenRef.current) {
       hideEditorShell(360);
@@ -1864,16 +2267,17 @@ export default function EditorScreen() {
       }
 
       if (data.type === 'plainText' && typeof data.payload === 'string') {
-        if (Platform.OS === 'web' && navigator?.clipboard) {
-          navigator.clipboard.writeText(data.payload || '');
+        const copied = data.payload || '';
+        void Clipboard.setStringAsync(copied, {
+          inputFormat: Clipboard.StringFormat.PLAIN_TEXT,
+        }).then(() => {
           setDialogConfig({
             title: t('editor.copied'),
             message: t('editor.noteCopied'),
           });
-          return;
-        }
-
-        Share.share({ message: data.payload || '' });
+        }).catch(() => {
+          Share.share({ message: copied });
+        });
       }
 
     } catch {
@@ -1887,9 +2291,21 @@ export default function EditorScreen() {
     goBackToMain();
   }
 
-  function handleCopy() {
+  async function handleCopy() {
     setShareOpen(false);
-    webviewRef.current?.injectJavaScript('window.__readText(); true;');
+    const snapshot = await captureContent();
+    const plainText = buildShellText(snapshot || '');
+    try {
+      await Clipboard.setStringAsync(plainText || '', {
+        inputFormat: Clipboard.StringFormat.PLAIN_TEXT,
+      });
+      setDialogConfig({
+        title: t('editor.copied'),
+        message: t('editor.noteCopied'),
+      });
+    } catch {
+      await Share.share({ message: plainText || '' });
+    }
   }
 
   async function handleGenerateLongImage() {

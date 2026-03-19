@@ -1,0 +1,3 @@
+# Prevent locked local export folders from breaking EAS archive upload
+apps/mobile/dist/
+apps/mobile/dist-ota-*/
